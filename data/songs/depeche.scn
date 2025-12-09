@@ -1,0 +1,194 @@
+{
+  "name": "depeche",
+  "audio_tracks": [
+    {
+      "file": "C:/Users/Alessandro/Music/Personal Jesus.wav",
+      "output": 6,
+      "channels": 2,
+      "channels_used": 2,
+      "output_start_channel": 1
+    }
+  ],
+  "midi_tracks": [
+    {
+      "file": "C:/Users/Alessandro/Music/midi test.mid",
+      "channel": 1,
+      "port": "loopMIDI Port 1 1"
+    }
+  ],
+  "lyrics": [
+    {
+      "line": "Reach out, touch faith",
+      "time": 1.86
+    },
+    {
+      "line": "Your own personal Jesus",
+      "time": 21.79
+    },
+    {
+      "line": "Someone to hear your prayers",
+      "time": 29.32
+    },
+    {
+      "line": "Someone who cares",
+      "time": 32.22
+    },
+    {
+      "line": "Your own personal Jesus",
+      "time": 36.21
+    },
+    {
+      "line": "Someone to hear your prayers",
+      "time": 44.42
+    },
+    {
+      "line": "Someone who's there",
+      "time": 47.87
+    },
+    {
+      "line": "Feeling unknown",
+      "time": 59.46
+    },
+    {
+      "line": "And you're all alone",
+      "time": 60.74
+    },
+    {
+      "line": "Flesh and bone",
+      "time": 62.85
+    },
+    {
+      "line": "By the telephone",
+      "time": 64.48
+    },
+    {
+      "line": "Lift up the receiver",
+      "time": 66.72
+    },
+    {
+      "line": "I'll make you a believer",
+      "time": 68.17
+    },
+    {
+      "line": "Take second best",
+      "time": 74.37
+    },
+    {
+      "line": "Put me to the test",
+      "time": 75.95
+    },
+    {
+      "line": "Things on your chest",
+      "time": 77.68
+    },
+    {
+      "line": "You need to confess",
+      "time": 79.25
+    },
+    {
+      "line": "I will deliver",
+      "time": 81.65
+    },
+    {
+      "line": "You know I'm a forgiver",
+      "time": 83.33
+    },
+    {
+      "line": "Reach out, touch faith",
+      "time": 90.76
+    },
+    {
+      "line": "Reach out, touch faith",
+      "time": 96.39
+    },
+    {
+      "line": "Your own personal Jesus",
+      "time": 103.55
+    },
+    {
+      "line": "Someone to hear your prayers",
+      "time": 111.21
+    },
+    {
+      "line": "Someone who cares",
+      "time": 113.99
+    },
+    {
+      "line": "Your own personal Jesus",
+      "time": 118.31
+    },
+    {
+      "line": "Someone to hear your prayers",
+      "time": 125.98
+    },
+    {
+      "line": "Someone who's there",
+      "time": 128.71
+    },
+    {
+      "line": "Feeling unknown",
+      "time": 151.85
+    },
+    {
+      "line": "And you're all alone",
+      "time": 153.13
+    },
+    {
+      "line": "Flesh and bone",
+      "time": 155.21
+    },
+    {
+      "line": "By the telephone",
+      "time": 156.66
+    },
+    {
+      "line": "Lift up the receiver",
+      "time": 159.21
+    },
+    {
+      "line": "I'll make you a believer",
+      "time": 160.69
+    },
+    {
+      "line": "I will deliver",
+      "time": 166.62
+    },
+    {
+      "line": "You know I'm a forgiver",
+      "time": 167.94
+    },
+    {
+      "line": "Reach out, touch faith",
+      "time": 175.71
+    },
+    {
+      "line": "Your own personal Jesus",
+      "time": 177.42
+    },
+    {
+      "line": "Reach out, touch faith",
+      "time": 186.94
+    },
+    {
+      "line": "Reach out, touch faith",
+      "time": 194.07
+    },
+    {
+      "line": "Reach out, touch faith",
+      "time": 201.74
+    },
+    {
+      "line": "(Reach out, reach out)",
+      "time": 205.44
+    },
+    {
+      "line": "Reach out, touch faith",
+      "time": 208.99
+    },
+    {
+      "line": "Reach out and touch faith",
+      "time": 216.55
+    }
+  ],
+  "lyrics_txt": "personal jesus.txt"
+}

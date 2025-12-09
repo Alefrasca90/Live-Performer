@@ -33,7 +33,7 @@ class MidiMapping:
 
 class UniversoStato:
     """Salva la configurazione di un Universo DMX."""
-    def __init__(self, id_universo: int, nome: str, istanze_stato: list[IstanzaFixtureStato], scene: list[Scena], chasers: list[Chaser], midi_mappings: list[MidiMapping], midi_channel: int = 0, midi_controller_port_name: str = ""):
+    def __init__(self, id_universo: int, nome: str, istanze_stato: list[IstanzaFixtureStato], scene: list[Scena], chasers: list[Chaser], midi_mappings: list[MidiMapping], midi_channel: int = 0, midi_controller_port_name: str = "", dmx_port_name: str = "COM5"):
         self.id_universo = id_universo
         self.nome = nome
         self.istanze_stato = istanze_stato
@@ -43,6 +43,7 @@ class UniversoStato:
         self.midi_channel = midi_channel # 0 = ALL, 1-16 = Canale Specifico
         # L'attributo è ora 'midi_controller_port_name' per salvare la porta MIDI usata
         self.midi_controller_port_name = midi_controller_port_name 
+        self.dmx_port_name = dmx_port_name # NUOVO: Porta DMX (Es: COM5)
         
     def __repr__(self):
         return f"UniversoStato(ID={self.id_universo}, nome='{self.nome}', fixture_count={len(self.istanze_stato)})"
@@ -56,5 +57,5 @@ class Progetto:
     def crea_vuoto(cls):
         """Crea un progetto con un universo di default e mappings vuoti."""
         default_universe = UniversoStato(id_universo=1, nome="Universo Principale", 
-                                          istanze_stato=[], scene=[], chasers=[], midi_mappings=[], midi_channel=0, midi_controller_port_name="") 
+                                          istanze_stato=[], scene=[], chasers=[], midi_mappings=[], midi_channel=0, midi_controller_port_name="", dmx_port_name="COM5") 
         return cls(universi_stato=[default_universe])

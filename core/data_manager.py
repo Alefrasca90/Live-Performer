@@ -117,7 +117,9 @@ class DataManager:
                 'scene': scene_ser,
                 'chasers': chasers_ser,
                 'midi_mappings': midi_mappings_ser,
-                'midi_channel': u_stato.midi_channel 
+                'midi_channel': u_stato.midi_channel,
+                'midi_controller_port_name': u_stato.midi_controller_port_name,
+                'dmx_port_name': u_stato.dmx_port_name # <-- AGGIUNTO
             })
 
         try:
@@ -135,7 +137,12 @@ class DataManager:
             
         try:
             with open(PROJECT_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+                # Modifica per risolvere l'errore di file vuoto
+                content = f.read().strip()
+                if not content:
+                     print(f"AVVISO: Il file {PROJECT_FILE.name} è vuoto o contiene solo spazi bianchi. Creazione progetto vuoto.")
+                     return Progetto.crea_vuoto()
+                data = json.loads(content)
                 
             universi_stato = []
             
@@ -194,6 +201,7 @@ class DataManager:
 
                 midi_channel = u_data.get('midi_channel', 0) 
                 midi_controller_port_name = u_data.get('midi_controller_port_name', "") 
+                dmx_port_name = u_data.get('dmx_port_name', "COM5") # <-- AGGIUNTO
 
                 universi_stato.append(UniversoStato(
                     id_universo=u_data.get('id', 1),
@@ -203,7 +211,8 @@ class DataManager:
                     chasers=chasers_list,
                     midi_mappings=midi_mappings_list,
                     midi_channel=midi_channel,
-                    midi_controller_port_name=midi_controller_port_name # <-- Aggiunto
+                    midi_controller_port_name=midi_controller_port_name,
+                    dmx_port_name=dmx_port_name # <-- AGGIUNTO
                 ))
                 
             if not universi_stato:

@@ -5,7 +5,7 @@
             {
                 "nome": "Dimmer",
                 "funzione": "Intensit\u00e0",
-                "default": 255
+                "default": 0
             },
             {
                 "nome": "Rosso",
@@ -25,6 +25,261 @@
             {
                 "nome": "Bianco",
                 "funzione": "Colore",
+                "default": 0
+            }
+        ]
+    },
+    {
+        "nome": "Algam Stage Bar 24Ch",
+        "canali": [
+            {
+                "nome": "Red 1",
+                "funzione": "Red 1",
+                "default": 0
+            },
+            {
+                "nome": "Green 1",
+                "funzione": "Green 1",
+                "default": 0
+            },
+            {
+                "nome": "Blue 1",
+                "funzione": "Blue 1",
+                "default": 0
+            },
+            {
+                "nome": "Dimmer 1",
+                "funzione": "Dimmer 1",
+                "default": 0
+            },
+            {
+                "nome": "Flash 1",
+                "funzione": "Flash 1",
+                "default": 0
+            },
+            {
+                "nome": "Red 2",
+                "funzione": "Red 2",
+                "default": 0
+            },
+            {
+                "nome": "Green 2",
+                "funzione": "Green 2",
+                "default": 0
+            },
+            {
+                "nome": "Blue 2",
+                "funzione": "Blue 2",
+                "default": 0
+            },
+            {
+                "nome": "Dimmer 2",
+                "funzione": "Dimmer 2",
+                "default": 0
+            },
+            {
+                "nome": "Flash 2",
+                "funzione": "Flash 2",
+                "default": 0
+            },
+            {
+                "nome": "Red 3",
+                "funzione": "Red 3",
+                "default": 0
+            },
+            {
+                "nome": "Green 3",
+                "funzione": "Green 3",
+                "default": 0
+            },
+            {
+                "nome": "Blue 3",
+                "funzione": "Blue 3",
+                "default": 0
+            },
+            {
+                "nome": "Dimmer 3",
+                "funzione": "Dimmer 3",
+                "default": 0
+            },
+            {
+                "nome": "Flash 3",
+                "funzione": "Flash 3",
+                "default": 0
+            },
+            {
+                "nome": "Red 4",
+                "funzione": "Red 4",
+                "default": 0
+            },
+            {
+                "nome": "Green 4",
+                "funzione": "Green 4",
+                "default": 0
+            },
+            {
+                "nome": "Blue 4",
+                "funzione": "Blue 4",
+                "default": 0
+            },
+            {
+                "nome": "Dimmer 4",
+                "funzione": "Dimmer 4",
+                "default": 0
+            },
+            {
+                "nome": "Flash 4",
+                "funzione": "Flash 4",
+                "default": 0
+            },
+            {
+                "nome": "White Led 1 Flash",
+                "funzione": "White Led 1 Flash",
+                "default": 0
+            },
+            {
+                "nome": "White Led 2 Flash",
+                "funzione": "White Led 2 Flash",
+                "default": 0
+            },
+            {
+                "nome": "White Led 3 Flash",
+                "funzione": "White Led 3 Flash",
+                "default": 0
+            },
+            {
+                "nome": "White Led 4 Flash",
+                "funzione": "White Led 4 Flash",
+                "default": 0
+            }
+        ]
+    },
+    {
+        "nome": "Eurolite Led Bar 3 HCL 10Ch",
+        "canali": [
+            {
+                "nome": "Dimmer",
+                "funzione": "Dimmer",
+                "default": 0
+            },
+            {
+                "nome": "Strobe",
+                "funzione": "Strobe",
+                "default": 0
+            },
+            {
+                "nome": "Red",
+                "funzione": "Red",
+                "default": 0
+            },
+            {
+                "nome": "Green",
+                "funzione": "Green",
+                "default": 0
+            },
+            {
+                "nome": "Blue",
+                "funzione": "Blue",
+                "default": 0
+            },
+            {
+                "nome": "White",
+                "funzione": "White",
+                "default": 0
+            },
+            {
+                "nome": "Amber",
+                "funzione": "Amber",
+                "default": 0
+            },
+            {
+                "nome": "UV",
+                "funzione": "UV",
+                "default": 0
+            },
+            {
+                "nome": "Preset Colors",
+                "funzione": "Preset Colors",
+                "default": 0
+            },
+            {
+                "nome": "Auto mode/sound control",
+                "funzione": "Auto mode/sound control",
+                "default": 0
+            }
+        ]
+    },
+    {
+        "nome": "Algam PAR Singolo",
+        "canali": [
+            {
+                "nome": "Red",
+                "funzione": "Red",
+                "default": 0
+            },
+            {
+                "nome": "Green",
+                "funzione": "Green",
+                "default": 0
+            },
+            {
+                "nome": "Blue",
+                "funzione": "Blue",
+                "default": 0
+            },
+            {
+                "nome": "Dimmer",
+                "funzione": "Dimmer",
+                "default": 0
+            },
+            {
+                "nome": "Flash",
+                "funzione": "Flash",
+                "default": 0
+            }
+        ]
+    },
+    {
+        "nome": "Algam LED Bianco",
+        "canali": [
+            {
+                "nome": "White Flash",
+                "funzione": "Flash",
+                "default": 0
+            }
+        ]
+    },
+    {
+        "nome": "Algam PAR Singolo (Virtuale)",
+        "canali": [
+            {
+                "nome": "Red",
+                "funzione": "Colore",
+                "default": 0
+            },
+            {
+                "nome": "Green",
+                "funzione": "Colore",
+                "default": 0
+            },
+            {
+                "nome": "Blue",
+                "funzione": "Colore",
+                "default": 0
+            },
+            {
+                "nome": "Dimmer",
+                "funzione": "Intensit\u00e0",
+                "default": 0
+            }
+        ]
+    },
+    {
+        "nome": "Algam LED Bianco (Virtuale)",
+        "canali": [
+            {
+                "nome": "White Flash",
+                "funzione": "Flash",
                 "default": 0
             }
         ]

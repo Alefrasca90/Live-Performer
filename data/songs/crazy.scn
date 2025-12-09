@@ -1,0 +1,160 @@
+{
+  "name": "crazy",
+  "audio_tracks": [
+    {
+      "file": "C:/Users/Alessandro/Music/Gnarls Barkley - Crazy.mp3",
+      "output": 2,
+      "channels": 2,
+      "channels_used": 2,
+      "output_start_channel": 1
+    }
+  ],
+  "midi_tracks": [],
+  "lyrics": [
+    {
+      "line": "I remember when",
+      "time": 4.25
+    },
+    {
+      "line": "I remember, I remember when I lost my mind",
+      "time": 6.25
+    },
+    {
+      "line": "There was something so pleasant about that place",
+      "time": 9.92
+    },
+    {
+      "line": "Even your emotions have an echo in so much space",
+      "time": 13.35
+    },
+    {
+      "line": "Hmm",
+      "time": 18.92
+    },
+    {
+      "line": "And when you're out there without care",
+      "time": 21.25
+    },
+    {
+      "line": "Yeah, I was out of touch",
+      "time": 23.33
+    },
+    {
+      "line": "But it wasn't because I didn't know enough",
+      "time": 27.05
+    },
+    {
+      "line": "I just knew too much, hm",
+      "time": 32.3
+    },
+    {
+      "line": "Does that make me crazy?",
+      "time": 36.88
+    },
+    {
+      "line": "Does that make me crazy?",
+      "time": 41.05
+    },
+    {
+      "line": "Does that make me crazy?",
+      "time": 45.37
+    },
+    {
+      "line": "Possibly",
+      "time": 49.79
+    },
+    {
+      "line": "And I hope that you are having the time of your life",
+      "time": 55.97
+    },
+    {
+      "line": "But think twice, that's my only advice, mm",
+      "time": 62.85
+    },
+    {
+      "line": "Come on now, who do you, who do you, who do you",
+      "time": 72.58
+    },
+    {
+      "line": "Who do you think you are?",
+      "time": 75.78
+    },
+    {
+      "line": "Ha-ha-ha, bless your soul",
+      "time": 78.56
+    },
+    {
+      "line": "You really think you're in control, well",
+      "time": 83.51
+    },
+    {
+      "line": "I think you're crazy",
+      "time": 88.28
+    },
+    {
+      "line": "I think you're crazy",
+      "time": 92.73
+    },
+    {
+      "line": "I think you're crazy",
+      "time": 96.88
+    },
+    {
+      "line": "Just like me",
+      "time": 101.23
+    },
+    {
+      "line": "My heroes had the heart to lose their lives out on the limb",
+      "time": 107.44
+    },
+    {
+      "line": "And all I remember is thinking \"I want to be like them\"",
+      "time": 114.31
+    },
+    {
+      "line": "Ever since I was little",
+      "time": 123.97
+    },
+    {
+      "line": "Ever since I was little, it looked like fun",
+      "time": 125.58
+    },
+    {
+      "line": "And it's no coincidence I've come",
+      "time": 129.88
+    },
+    {
+      "line": "And I can die when I'm done",
+      "time": 135.25
+    },
+    {
+      "line": "But maybe I'm crazy",
+      "time": 139.78
+    },
+    {
+      "line": "Maybe you're crazy",
+      "time": 144.03
+    },
+    {
+      "line": "Maybe we're crazy",
+      "time": 148.28
+    },
+    {
+      "line": "Probably",
+      "time": 152.65
+    },
+    {
+      "line": "Whoo-ooh-whoo",
+      "time": 159.07
+    },
+    {
+      "line": "Whoo-ooh",
+      "time": 169.84
+    },
+    {
+      "line": "Whoo-hmm-mm",
+      "time": 174.17
+    }
+  ],
+  "lyrics_txt": "crazy - lyrics.txt"
+}

@@ -62,8 +62,12 @@ class DMXControlWidget(QWidget,
              self._ricostruisci_universi() 
              self.universo_attivo = next(iter(self.universi.values()))
 
-        # 3. DMX Controller (COM5 è l'esempio)
-        self.dmx_comm = DMXController(port_name="COM5") 
+        # 3. DMX Controller
+        # CARICA LA PORTA DMX DALLO STATO DEL PROGETTO
+        current_u_state = next((u for u in self.progetto.universi_stato if u.id_universo == self.universo_attivo.id_universo), Progetto.crea_vuoto().universi_stato[0])
+        dmx_port = getattr(current_u_state, 'dmx_port_name', 'COM5') # Prende il nuovo campo o il default
+        
+        self.dmx_comm = DMXController(port_name=dmx_port) 
         self.dmx_comm.connect() 
         
         # 4. Stage View
@@ -136,7 +140,7 @@ class DMXControlWidget(QWidget,
         pass
 
     # Metodi ausiliari per la UI (ripristinati come nell'originale, ma ora in un mixin o nella classe)
-    # L'implementazione completa di _crea_pannello_controllo è ereditata dal Mixin.
+    # L'implementazione completa di _crea_pannello_controllo è qui sotto.
 
     def _midi_message_router(self, msg):
         """Reindirizza il messaggio MIDI al logger e al gestore di mappatura (dal Mixin)."""
@@ -178,3 +182,132 @@ class DMXControlWidget(QWidget,
         
         dialog.chaser_saved.connect(self._handle_chaser_saved)
         dialog.exec()
+
+    # --- UI DMX ---
+    def _crea_pannello_controllo(self):
+        """Metodo che crea l'intero pannello di controllo DMX a sinistra/sotto."""
+        group_box = QGroupBox("Gestione Controller DMX")
+        layout = QVBoxLayout(group_box)
+        
+        # 1. MIDI MONITOR (Ingresso)
+        midi_group = QGroupBox("MIDI Monitor (Segnali in Ingresso)")
+        midi_layout = QVBoxLayout(midi_group)
+        
+        # Usa la QListWidget creata in __init__
+        midi_layout.addWidget(self.midi_log_list) 
+        midi_layout.addItem(QSpacerItem(20, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)) 
+        
+        layout.addWidget(midi_group)
+        
+        # 2. Lista Fixture Assegnate e Rimozione
+        list_group = QGroupBox(f"Fixture Assegnate: {self.universo_attivo.nome}")
+        list_layout = QVBoxLayout(list_group)
+
+        self.assigned_list_widget = QListWidget() 
+        self.assigned_list_widget.setMaximumHeight(100)
+        
+        # Layout Pulsanti (Aggiungi/Rimuovi)
+        add_remove_layout = QHBoxLayout() 
+        
+        # Pulsante che apre il Dialog per l'aggiunta
+        self.btn_open_add_fixture = QPushButton("Aggiungi Fixture")
+        self.btn_open_add_fixture.clicked.connect(self._open_add_fixture_dialog) 
+        
+        self.btn_remove_instance = QPushButton("Rimuovi Selezionato")
+        self.btn_remove_instance.clicked.connect(self._rimuovi_istanza_da_universo) 
+        
+        self._update_assigned_list_ui() 
+
+        list_layout.addWidget(self.assigned_list_widget)
+
+        add_remove_layout.addWidget(self.btn_open_add_fixture) 
+        add_remove_layout.addWidget(self.btn_remove_instance)
+        list_layout.addLayout(add_remove_layout) 
+        
+        layout.addWidget(list_group)
+        
+        # 3. Stato Connessione DMX (Toggle)
+        comm_group = QGroupBox("Stato Uscita DMX")
+        comm_layout = QVBoxLayout(comm_group)
+
+        self.dmx_enable_checkbox = QCheckBox("Abilita Uscita DMX")
+        self.dmx_enable_checkbox.setChecked(self.dmx_comm.is_enabled)
+        self.dmx_enable_checkbox.stateChanged.connect(self._toggle_dmx_output) 
+        comm_layout.addWidget(self.dmx_enable_checkbox)
+        
+        self.status_label = QLabel("Non Connesso")
+        self.refresh_ports_btn = QPushButton("Riconnetti / Aggiorna Porte")
+        self.refresh_ports_btn.clicked.connect(self._handle_dmx_connection) 
+        
+        comm_layout.addWidget(self.status_label)
+        comm_layout.addWidget(self.refresh_ports_btn)
+        layout.addWidget(comm_group)
+        self._update_dmx_status_ui() 
+        
+        # 4. Gestione Scene (SEPARATO)
+        scene_group = QGroupBox("Gestione Scene")
+        scene_layout = QVBoxLayout(scene_group)
+        
+        # Cattura Scena
+        capture_layout = QHBoxLayout()
+        self.scene_name_input = QLineEdit()
+        self.scene_name_input.setPlaceholderText("Nome Scena")
+        self.btn_capture_scene = QPushButton("Salva")
+        self.btn_capture_scene.clicked.connect(self._cattura_scena_corrente) 
+        capture_layout.addWidget(self.scene_name_input)
+        capture_layout.addWidget(self.btn_capture_scene)
+        scene_layout.addWidget(QLabel("Cattura Scena Corrente:"))
+        scene_layout.addLayout(capture_layout)
+        
+        # Lista Scene
+        scene_layout.addWidget(QLabel("\nScene Salvate (Doppio Click per Applicare):"))
+        self.scene_list_widget = QListWidget() 
+        self.scene_list_widget.setMaximumHeight(100)
+        self.scene_list_widget.doubleClicked.connect(self._applica_scena_selezionata) 
+        scene_layout.addWidget(self.scene_list_widget)
+        
+        scene_list_ctrl = QHBoxLayout()
+        self.btn_delete_scene = QPushButton("Cancella")
+        self.btn_delete_scene.clicked.connect(self._cancella_scena_selezionata) 
+        scene_list_ctrl.addStretch(1) 
+        scene_list_ctrl.addWidget(self.btn_delete_scene)
+        scene_layout.addLayout(scene_list_ctrl)
+        
+        layout.addWidget(scene_group) 
+        
+        # 5. Gestione Sequenze (Chaser) (NUOVO GRUPPO)
+        chaser_group = QGroupBox("Gestione Sequenze (Chaser)")
+        chaser_layout = QVBoxLayout(chaser_group)
+        
+        # Editor Chaser
+        editor_layout = QHBoxLayout()
+        self.btn_open_chaser_editor = QPushButton("Crea / Modifica Sequenza") 
+        self.btn_open_chaser_editor.clicked.connect(self._open_chaser_editor_dialog)
+        self.btn_delete_chaser = QPushButton("Cancella Sequenza") 
+        self.btn_delete_chaser.clicked.connect(self._cancella_chaser_selezionato)
+        editor_layout.addWidget(self.btn_open_chaser_editor)
+        editor_layout.addWidget(self.btn_delete_chaser)
+        chaser_layout.addLayout(editor_layout)
+        
+        # Lista Chaser
+        chaser_layout.addWidget(QLabel("\nSequenze Salvate (Seleziona per Avviare):"))
+        self.chaser_list_widget = QListWidget() 
+        self.chaser_list_widget.setMaximumHeight(100)
+        self.chaser_list_widget.doubleClicked.connect(self._open_chaser_editor_dialog) 
+        chaser_layout.addWidget(self.chaser_list_widget)
+        
+        # Controlli Chaser
+        chaser_ctrl_layout = QHBoxLayout()
+        self.btn_start_chaser = QPushButton("Avvia Sequenza Selezionata") 
+        self.btn_start_chaser.clicked.connect(self._avvia_chaser) 
+        self.btn_stop_chaser = QPushButton("Stop Sequenza") 
+        self.btn_stop_chaser.clicked.connect(self._ferma_chaser) 
+        chaser_ctrl_layout.addWidget(self.btn_start_chaser)
+        chaser_ctrl_layout.addWidget(self.btn_stop_chaser)
+        chaser_layout.addLayout(chaser_ctrl_layout)
+        
+        layout.addWidget(chaser_group) 
+        
+        # Spaziatore per spingere gli elementi in alto
+        layout.addItem(QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)) 
+        return group_box
