@@ -1,6 +1,4 @@
-# engines/midi_engine.py (Gestore MIDI Output/Clock)
-
-from PyQt6.QtCore import QObject, pyqtSignal 
+from PyQt6.QtCore import QObject, pyqtSignal
 import mido
 import threading
 import time
@@ -17,13 +15,7 @@ class MidiEngine(QObject):
     def __init__(self, parent=None): 
         super().__init__(parent)
         self.driver = None
-        # FIX: Assicuriamo che mido sia importato e utilizzabile
-        try:
-             self.outputs = mido.get_output_names()
-        except Exception:
-             self.outputs = []
-             
-        # MODIFICATO: Aggiunto 'file' alla struttura della traccia
+        self.outputs = mido.get_output_names()
         self.tracks = {}  # { song: [ {file, channel, port} ] }
         self.default_port = None
         
@@ -47,10 +39,7 @@ class MidiEngine(QObject):
     # -------------------------------------------------------------
 
     def refresh_outputs(self):
-        try:
-             self.outputs = mido.get_output_names()
-        except Exception:
-             self.outputs = []
+        self.outputs = mido.get_output_names()
 
     def set_driver(self, driver_name, port_name):
         self.driver = driver_name
@@ -142,39 +131,34 @@ class MidiEngine(QObject):
             
             with mido.open_output(port_name, autoreset=True) as out:
                 start_time = time.time()
-                first_message = True
-                message_count = 0
-
-                # RIGA CRITICA CORRETTA: Rimossi 'tempo' e 'message_channel'
-                for msg in midi_file.play(meta_messages=False):
+                first_message = True # FLAG DI DEBUG
+                
+                for msg in midi_file.play(meta_messages=False, message_channel=channel, tempo=mido.bpm2tempo(master_bpm)):
                     
                     if not self.playback_running:
                         break
                         
-                    # Imposta il canale di output qui
                     msg.channel = channel 
                     out.send(msg)
-                    message_count += 1
                     
                     current_time = time.time() - start_time
                     
-                    # Messaggio di stato se il primo messaggio viene inviato
+                    # NUOVO: Emette un segnale esplicito per la prima volta
                     if first_message:
-                         self.midi_message_sent.emit(current_time, f"[{file_name}] **PLAYBACK INIZIATO** - Primo messaggio inviato: {msg}")
+                         self.midi_message_sent.emit(current_time, f"[{file_name}] **SEQUENZA INIZIATA** - Primo messaggio inviato: {msg}")
                          first_message = False
 
                     self.midi_message_sent.emit(current_time, f"[{file_name}] {msg}")
                     
-            # Segnale esplicito se il file MIDI era vuoto
-            if message_count == 0:
-                 self.midi_message_sent.emit(time.time() - start_time, f"[{file_name}] ERRORE: 0 messaggi riproducibili trovati nel file MIDI.")
+            self.midi_message_sent.emit(time.time() - start_time, f"[{file_name}] Fine playback.")
             
-            self.midi_message_sent.emit(time.time() - start_time, f"[{file_name}] Fine playback ({message_count} messaggi inviati).")
-            
+        except mido.UnknownFileTypeError:
+            error_msg = f"[{file_name}] ERRORE: Formato file MIDI non valido o corrotto."
+            self.midi_message_sent.emit(0.0, f"[ERRORE] {error_msg}")
         except Exception as e:
-             # CATTURA QUALSIASI ERRORE DI CARICAMENTO FILE o di porta.
-             error_msg = f"[{file_name}] ERRORE CRITICO: {type(e).__name__}: {e}"
-             self.midi_message_sent.emit(0.0, f"[ERRORE] {error_msg}")
+            # CATTURA ERRORI DI PORTA (mido.open_output) o altri errori interni
+            error_msg = f"[{file_name}] ERRORE CRITICO: {type(e).__name__}: {e}"
+            self.midi_message_sent.emit(0.0, f"[ERRORE] {error_msg}")
             
     # -------------------------------------------------------------
     # PLAYBACK CONTROL
@@ -224,7 +208,8 @@ class MidiEngine(QObject):
         self.paused = False
         self.playback_running = True # Abilita l'esecuzione dei thread file
 
-        if bpm is not None:
+        # **POTENZIALE RIGA 222 QUI** - CORRETTA
+        if bpm is not None:  # <--- I due punti sono qui
              self._current_song_bpm = bpm
         
         # 1. Gestione MIDI Clock

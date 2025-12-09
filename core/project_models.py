@@ -16,7 +16,7 @@ class IstanzaFixtureStato:
 
 class MidiMapping:
     """Modello per salvare una mappatura MIDI specifica a una Scena/Chaser."""
-    def __init__(self, midi_type: str, midi_number: int, value: int, action_type: str, action_index: int):
+    def __init__(self, midi_type: str, midi_number: int, value: int, action_type: str, action_index: int, internal_only: bool = False):
         # midi_type: 'note', 'cc', 'pc'
         self.midi_type = midi_type
         # midi_number: Note/CC/PC number
@@ -27,9 +27,11 @@ class MidiMapping:
         self.action_type = action_type
         # action_index: Indice della scena o chaser (0-based)
         self.action_index = action_index
-
+        # [NUOVO] Indica se il messaggio deve essere consumato internamente (per DMX) e NON inviato sull'uscita MIDI.
+        self.internal_only = internal_only
+        
     def __repr__(self):
-        return f"MidiMapping({self.midi_type}:{self.midi_number}/{self.value} -> {self.action_type}:{self.action_index})"
+        return f"MidiMapping({self.midi_type}:{self.midi_number}/{self.value} -> {self.action_type}:{self.action_index}, internal_only={self.internal_only})"
 
 class UniversoStato:
     """Salva la configurazione di un Universo DMX."""

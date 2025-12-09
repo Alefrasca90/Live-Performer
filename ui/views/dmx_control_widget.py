@@ -91,7 +91,14 @@ class DMXControlWidget(QWidget,
         
         # 6. Setup MIDI Control (Input)
         self.midi_controller = MIDIController(parent=self)
+        
+        # Connette il segnale del controller hardware MIDI (Input) al router DMX
         self.midi_controller.midi_message.connect(self._midi_message_router) 
+        
+        # [MODIFICATO] Connette il segnale del file MIDI (Output/Engine) al router DMX
+        if hasattr(self.midi_engine, 'midi_file_message'):
+             self.midi_engine.midi_file_message.connect(self._midi_message_router) 
+             
         self._load_midi_settings() 
         
         # 7. Setup UI: Rimosso il setup locale del MIDI log.
@@ -297,7 +304,25 @@ class DMXControlWidget(QWidget,
         super()._open_fixture_editor()
 
     def _open_midi_mapping_dialog(self):
-        super()._open_midi_mapping_dialog()
+        # Assicuriamo che le liste siano aggiornate, prendendole dai mixin
+        scene_list = getattr(self, 'scene_list', [])
+        chaser_list = getattr(self, 'chaser_list', [])
+        
+        # Assicuriamo che lo stato sia aggiornato
+        u_stato = next((u for u in self.progetto.universi_stato if u.id_universo == self.universo_attivo.id_universo), Progetto.crea_vuoto().universi_stato[0])
+
+        dialog = MidiMappingDialog(
+            parent=self,
+            scene_list=scene_list,
+            chaser_list=chaser_list,
+            current_mappings=u_stato.midi_mappings,
+            current_channel_filter=u_stato.midi_channel,
+            available_ports=self.midi_controller.list_input_ports(),
+            current_port_name=self.midi_controller.input_port_name 
+        )
+        # [NUOVO] Connette il segnale per salvare i risultati al nuovo handler del mixin
+        dialog.mappings_saved.connect(self._handle_midi_mappings_saved)
+        dialog.exec()
     
     def _handle_dmx_connection(self):
          super()._handle_dmx_connection()

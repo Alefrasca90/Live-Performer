@@ -16,6 +16,9 @@ from engines.video_engine import VideoEngine
 from ui.views.video_player_widget import VideoPlayerWidget 
 from core.data_manager import DataManager
 
+# [NUOVO] Costante per la porta interna (non invia MIDI esterno)
+INTERNAL_DMX_PORT = "INTERNAL_DMX_PORT_TRIGGER"
+
 
 class SongEditorWidget(QWidget):
     """
@@ -256,8 +259,12 @@ class SongEditorWidget(QWidget):
                   # Utilizza os.sep per uno split più robusto sui percorsi locali
                   file_name = t['file'].split(os.sep)[-1]
                   midi_file_info = f"File: {file_name} | "
+            
+             port_display = t['port']
+             if port_display == INTERNAL_DMX_PORT: # [MODIFICATO] Aggiunge l'etichetta per la porta interna
+                 port_display = "Solo DMX Interno (Nessun Output MIDI)"
                  
-             self.midi_list.addItem(f"{midi_file_info}Porta: {t['port']} | Canale MIDI: {t['channel']}")
+             self.midi_list.addItem(f"{midi_file_info}Porta: {port_display} | Canale MIDI: {t['channel']}")
         
         # --- VIDEO TRACK ---
         self.video_file = song_data.get("video_file", None)
@@ -522,12 +529,14 @@ class SongEditorWidget(QWidget):
         # 2. SELEZIONE PORTA E CANALE
         next_channel = (self.midi_list.count() % 16) + 1
         
-        port_options = self.midi_engine.outputs
+        # [MODIFICATO] Aggiungi l'opzione "Internal DMX Only"
+        port_options = ["Solo DMX Interno (Nessun Output MIDI)"] + self.midi_engine.outputs
+        
         if not port_options:
             QMessageBox.warning(self, "Attenzione", "Nessuna porta MIDI trovata. Impossibile aggiungere la traccia.")
             return
 
-        port_name, ok = QInputDialog.getItem(
+        port_name_selected, ok = QInputDialog.getItem(
             self,
             "Seleziona Porta MIDI",
             f"Seleziona porta per il file '{file_name}' (Canale suggerito: {next_channel}):",
@@ -535,9 +544,12 @@ class SongEditorWidget(QWidget):
             editable=False
         )
         
-        if ok and port_name:
+        if ok and port_name_selected:
+            
+            port_to_save = INTERNAL_DMX_PORT if port_name_selected == "Solo DMX Interno (Nessun Output MIDI)" else port_name_selected
+            
             # 3. Aggiorna DataManager (add_midi_track ora si occupa della copia del file)
-            self.data_manager.add_midi_track(self.song_name, next_channel, port_name, file_path=file_path)
+            self.data_manager.add_midi_track(self.song_name, next_channel, port_to_save, file_path=file_path)
             self.load_song()
             
             QMessageBox.information(self, "Importazione MIDI", 
@@ -561,44 +573,67 @@ class SongEditorWidget(QWidget):
         midi_tracks = self.data_manager.midi_tracks.get(self.song_name, [])
         if not midi_tracks or current >= len(midi_tracks): return
 
+        current_port = midi_tracks[current].get("port")
+        current_channel = midi_tracks[current].get("channel")
+
         # 1. Selezione Porta
-        port_options = self.midi_engine.outputs
+        # [MODIFICATO] Aggiungi l'opzione "Internal DMX Only"
+        port_options = ["Solo DMX Interno (Nessun Output MIDI)"] + self.midi_engine.outputs
+        
         if not port_options:
             QInputDialog.getText(self, "Errore", "Nessuna porta MIDI trovata.")
             return
             
-        new_port, ok_port = QInputDialog.getItem(
+        default_port_index = 0
+        if current_port and current_port != INTERNAL_DMX_PORT:
+            try:
+                default_port_index = port_options.index(current_port)
+            except ValueError:
+                 pass
+        elif current_port == INTERNAL_DMX_PORT:
+             default_port_index = 0 # "Solo DMX Interno" è il primo elemento
+        
+        new_port_selected, ok_port = QInputDialog.getItem(
             self,
             "Modifica Porta MIDI",
             f"Seleziona nuova porta per la traccia:",
             port_options,
-            editable=False
+            editable=False,
+            current=default_port_index
         )
         
+        if not ok_port or not new_port_selected:
+             return
+             
+        new_port_to_save = INTERNAL_DMX_PORT if new_port_selected == "Solo DMX Interno (Nessun Output MIDI)" else new_port_selected
+
         # 2. Selezione Canale
         channel_options = [str(i) for i in range(1, 17)]
+        default_channel_index = max(0, current_channel - 1)
+        
         new_channel_str, ok_channel = QInputDialog.getItem(
             self,
             "Modifica Canale MIDI",
             f"Seleziona nuovo canale MIDI (1-16):",
             channel_options,
-            editable=False
+            editable=False,
+            current=default_channel_index
         )
 
-        if ok_port and new_port and ok_channel and new_channel_str:
+        if ok_channel and new_channel_str:
             new_channel = int(new_channel_str)
             
             # 3. Aggiorna DataManager e MidiEngine
             self.data_manager.update_midi_track_output(
                 self.song_name, 
                 current, 
-                new_port, 
+                new_port_to_save, 
                 new_channel
             )
             self.midi_engine.update_track_output(
                 self.song_name, 
                 current, 
-                new_port, 
+                new_port_to_save, 
                 new_channel
             )
             self.load_song()

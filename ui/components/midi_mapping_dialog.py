@@ -3,7 +3,7 @@
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget, 
     QTableWidgetItem, QHeaderView, QPushButton, QComboBox, 
-    QSpinBox, QAbstractItemView, QWidget, QLineEdit, QMessageBox, QGroupBox
+    QSpinBox, QAbstractItemView, QWidget, QLineEdit, QMessageBox, QGroupBox, QCheckBox 
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 
@@ -37,7 +37,7 @@ class MidiMappingDialog(QDialog):
 
     def _setup_ui(self):
         main_layout = QVBoxLayout(self)
-        self.resize(800, 500)
+        self.resize(1000, 500) # Dimensione aumentata per la nuova colonna
 
         # --- Sezione Impostazioni MIDI ---
         settings_group = QGroupBox("Impostazioni Controller")
@@ -68,13 +68,14 @@ class MidiMappingDialog(QDialog):
         
         # 1. Tabella di Mappatura
         self.table = QTableWidget()
-        self.table.setColumnCount(5)
+        self.table.setColumnCount(6) # MODIFICATO: da 5 a 6 colonne
         self.table.setHorizontalHeaderLabels([
             "Tipo MIDI", 
             "Numero (Nota/CC/PC#)", 
             "Valore Min/Soglia", 
             "Azione", 
-            "Target (Scena/Chaser)"
+            "Target (Scena/Chaser)",
+            "Solo DMX Interno" # NUOVO NOME COLONNA
         ])
         
         # Imposta le colonne per le dimensioni
@@ -83,6 +84,7 @@ class MidiMappingDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents) # NUOVA COLONNA
         
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         main_layout.addWidget(self.table)
@@ -152,6 +154,13 @@ class MidiMappingDialog(QDialog):
         combo_target.addItems(target_options)
         self.table.setCellWidget(row, 4, combo_target)
         
+        # Colonna 5: Solo DMX Interno (Checkbox)
+        chk_internal = QCheckBox()
+        # Verifichiamo l'esistenza dell'attributo per compatibilità con dati vecchi
+        if mapping and hasattr(mapping, 'internal_only'): 
+             chk_internal.setChecked(mapping.internal_only)
+        self.table.setCellWidget(row, 5, chk_internal)
+        
         if mapping:
             combo_type.setCurrentText(mapping.midi_type)
             spin_number.setValue(mapping.midi_number)
@@ -206,6 +215,7 @@ class MidiMappingDialog(QDialog):
                 spin_value = self.table.cellWidget(row, 2)
                 combo_action = self.table.cellWidget(row, 3)
                 combo_target = self.table.cellWidget(row, 4)
+                chk_internal = self.table.cellWidget(row, 5) # NUOVO WIDGET
 
                 # Estrazione dei valori
                 midi_type = combo_type.currentText()
@@ -213,6 +223,8 @@ class MidiMappingDialog(QDialog):
                 value = spin_value.value()
                 action_type = combo_action.currentText()
                 target_text = combo_target.currentText()
+                
+                internal_only = chk_internal.isChecked() if chk_internal else False # NUOVO VALORE
 
                 action_index = -1 
 
@@ -246,7 +258,8 @@ class MidiMappingDialog(QDialog):
                     midi_number=midi_number, 
                     value=value, 
                     action_type=action_type, 
-                    action_index=action_index
+                    action_index=action_index,
+                    internal_only=internal_only # AGGIUNTO
                 ))
 
             except Exception as e:

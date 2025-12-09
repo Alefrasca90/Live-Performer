@@ -15,6 +15,9 @@ DATA_PATH = Path(__file__).parent.parent / "data"
 PROFILE_FILE = DATA_PATH / "fixture_profiles.json"
 PROJECT_FILE = DATA_PATH / "project.json"
 
+# [NUOVO] Costante per la porta interna (deve essere lo stesso di song_editor_widget.py)
+INTERNAL_DMX_PORT = "INTERNAL_DMX_PORT_TRIGGER" 
+
 class DataManager:
     """
     Gestore Unificato per la persistenza di:
@@ -143,7 +146,8 @@ class DataManager:
                             'midi_number': m.midi_number,
                             'value': m.value,
                             'action_type': m.action_type,
-                            'action_index': m.action_index
+                            'action_index': m.action_index,
+                            'internal_only': getattr(m, 'internal_only', False) # AGGIUNTO per salvare il nuovo flag
                         }
                         for m in u_stato.midi_mappings
                     ],
@@ -219,7 +223,8 @@ class DataManager:
                     midi_number=m_data.get('midi_number', 0),
                     value=m_data.get('value', 0),
                     action_type=m_data.get('action_type', 'stop'),
-                    action_index=m_data.get('action_index', -1)
+                    action_index=m_data.get('action_index', -1),
+                    internal_only=m_data.get('internal_only', False) # AGGIUNTO per caricare il nuovo flag
                 )
                 for m_data in u_data.get('midi_mappings', [])
             ]
@@ -420,8 +425,10 @@ class DataManager:
     # --- GESTIONE TRACCE MIDI ---
     def add_midi_track(self, song_name, channel, port=None, file_path=None):
         """Aggiunge una traccia MIDI con percorso del file, copiando il file localmente."""
+        
+        # [MODIFICATO] Solo copia se la porta NON è la porta interna
         new_file_path = file_path
-        if file_path:
+        if file_path and port != INTERNAL_DMX_PORT:
             new_file_path = self._copy_file_to_song_folder(song_name, file_path) # Copia file
             
         self.midi_tracks.setdefault(song_name, []).append({

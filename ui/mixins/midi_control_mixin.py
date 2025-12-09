@@ -44,11 +44,15 @@ class MIDIControlMixin:
         if not self.midi_mappings and self.universo_attivo and len(self.universo_attivo.fixture_assegnate) > 0:
              # Usiamo le liste di Scene/Chaser caricate in SceneChaserMixin (se esistono)
              if hasattr(self, 'scene_list') and self.scene_list:
-                 self.midi_mappings.append(MidiMapping(midi_type='note', midi_number=48, value=1, action_type='scene', action_index=0)) # Note C3 -> Scena 1
+                 self.midi_mappings.append(MidiMapping(midi_type='note', midi_number=48, value=1, action_type='scene', action_index=0, internal_only=True)) # Note C3 -> Scena 1 (Aggiunto internal_only per default)
              if hasattr(self, 'chaser_list') and self.chaser_list:
-                 self.midi_mappings.append(MidiMapping(midi_type='cc', midi_number=10, value=65, action_type='chaser', action_index=0)) # CC 10 > 64 -> Chaser 1
-             self.midi_mappings.append(MidiMapping(midi_type='note', midi_number=60, value=1, action_type='stop', action_index=-1)) # Note C4 -> Stop
+                 self.midi_mappings.append(MidiMapping(midi_type='cc', midi_number=10, value=65, action_type='chaser', action_index=0, internal_only=True)) # CC 10 > 64 -> Chaser 1 (Aggiunto internal_only per default)
+             self.midi_mappings.append(MidiMapping(midi_type='note', midi_number=60, value=1, action_type='stop', action_index=-1, internal_only=True)) # Note C4 -> Stop (Aggiunto internal_only per default)
              
+        # [NUOVO] Invia le mappature al MidiEngine per la soppressione dei messaggi.
+        if hasattr(self, 'midi_engine') and hasattr(self.midi_engine, 'set_dmx_mappings'):
+             self.midi_engine.set_dmx_mappings(self.midi_mappings) 
+
 
     def _handle_midi_message(self, msg):
         """Callback eseguita nel thread principale per processare CC/PC/Note in base alle mappature."""
@@ -133,3 +137,21 @@ class MIDIControlMixin:
                     self.setWindowTitle("DMX Controller - MIDI STOP")
                 
                 return # Termina dopo l'esecuzione
+    
+    # [NUOVO] Metodo per gestire il salvataggio dal dialogo
+    def _handle_midi_mappings_saved(self, new_mappings: list, new_channel_filter: int, new_port_name: str):
+        """Gestisce il salvataggio dei nuovi dati dal dialogo di mappatura."""
+        u_stato = next((u for u in self.progetto.universi_stato if u.id_universo == self.universo_attivo.id_universo), None)
+        if u_stato:
+            u_stato.midi_mappings = new_mappings
+            u_stato.midi_channel = new_channel_filter
+            u_stato.midi_controller_port_name = new_port_name
+            
+            self._salva_stato_progetto()
+            self._load_midi_settings(new_port_name=new_port_name) # Ricarica e riconnette con le nuove impostazioni
+            
+            # Invia le mappature aggiornate al MidiEngine
+            if hasattr(self, 'midi_engine') and hasattr(self.midi_engine, 'set_dmx_mappings'):
+                self.midi_engine.set_dmx_mappings(new_mappings)
+
+        QMessageBox.information(self, "Successo", "Mappature MIDI salvate e applicate.")

@@ -440,29 +440,40 @@
             ],
             "midi_mappings": [
                 {
-                    "midi_type": "pc",
-                    "midi_number": 13,
+                    "midi_type": "note",
+                    "midi_number": 0,
                     "value": 64,
                     "action_type": "scene",
-                    "action_index": 0
+                    "action_index": 0,
+                    "internal_only": true
                 },
                 {
-                    "midi_type": "pc",
-                    "midi_number": 14,
+                    "midi_type": "note",
+                    "midi_number": 1,
                     "value": 64,
                     "action_type": "scene",
-                    "action_index": 1
+                    "action_index": 1,
+                    "internal_only": true
                 },
                 {
-                    "midi_type": "pc",
-                    "midi_number": 15,
+                    "midi_type": "note",
+                    "midi_number": 3,
                     "value": 64,
                     "action_type": "chaser",
-                    "action_index": 1
+                    "action_index": 1,
+                    "internal_only": true
+                },
+                {
+                    "midi_type": "note",
+                    "midi_number": 2,
+                    "value": 64,
+                    "action_type": "scene",
+                    "action_index": 2,
+                    "internal_only": true
                 }
             ],
-            "midi_channel": 10,
-            "midi_controller_port_name": "",
+            "midi_channel": 0,
+            "midi_controller_port_name": "loopMIDI Port 1 0",
             "dmx_port_name": "COM5"
         }
     ]
