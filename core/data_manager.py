@@ -1,11 +1,15 @@
+# core/data_manager.py
+# Gestore Unificato per la persistenza di:
+# 1. Modelli Fixture e Stato del Progetto DMX (Metodi statici/classe).
+# 2. Canzoni, Playlist e Cache Media (Metodi di istanza).
+
 import json
 import os
 from pathlib import Path
 from core.dmx_models import FixtureModello, CanaleDMX, Scena, Chaser, PassoChaser
 from core.project_models import Progetto, UniversoStato, IstanzaFixtureStato, MidiMapping
 
-# --- DMX/Project Constants ---
-# Assumiamo che la cartella 'data' sia nella root del progetto unificato
+# --- DMX / Project Constants ---
 DATA_PATH = Path(__file__).parent.parent / "data"
 PROFILE_FILE = DATA_PATH / "fixture_profiles.json"
 PROJECT_FILE = DATA_PATH / "project.json"
@@ -36,6 +40,8 @@ class DataManager:
     # --- DMX / PROJECT / FIXTURE MODELS MANAGEMENT (STATIC) ---
     # =============================================================
     
+    # ... (Metodi DMX Statici omessi per brevità) ...
+
     @staticmethod
     def _modello_to_dict(modello: FixtureModello) -> dict:
         canali = [
@@ -238,9 +244,6 @@ class DataManager:
 
     # --- GESTIONE CANZONI / PLAYLISTS (Metodi di istanza) ---
     
-    # [Tutti i metodi di istanza per Songs, Tracks, Lyrics, Playlists qui sotto]
-    # L'unione completa dei metodi media si trova nel file core/data_manager.py
-    
     def get_songs(self):
         """Restituisce la lista dei nomi delle canzoni salvate."""
         if not os.path.exists(self.songs_dir):
@@ -256,7 +259,8 @@ class DataManager:
         path = os.path.join(self.songs_dir, f"{name}{self.song_extension}")
         if os.path.exists(path):
             return False
-        data = {"name": name, "audio_tracks": [], "midi_tracks": [], "lyrics": [], "lyrics_txt": None}
+        # Aggiunta la chiave "video_file"
+        data = {"name": name, "audio_tracks": [], "midi_tracks": [], "video_file": None, "lyrics": [], "lyrics_txt": None}
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
         self.audio_tracks[name] = []
@@ -279,15 +283,24 @@ class DataManager:
         self.audio_tracks[name] = data.get("audio_tracks", [])
         self.midi_tracks[name] = data.get("midi_tracks", [])
         self.lyrics[name] = data.get("lyrics", [])
+        # Il campo video_file viene caricato e rimane nel dizionario data
+        
+        if "video_file" not in data:
+            data["video_file"] = None
+
         return data
 
     def save_song(self, name, data=None):
         """Salva lo stato corrente della canzone sul file .scn."""
         if data is None:
+            # Recuperiamo i dati completi, inclusi lyrics_txt e video_file, per non perderli
+            current_data = self.load_song(name) 
+            
             data = {
                 "name": name,
                 "audio_tracks": self.audio_tracks.get(name, []),
                 "midi_tracks": self.midi_tracks.get(name, []),
+                "video_file": current_data.get("video_file", None) if current_data else None,
                 "lyrics": self.lyrics.get(name, []),
                 "lyrics_txt": self.get_lyrics_txt_file(name)
             }
@@ -314,6 +327,26 @@ class DataManager:
         self.audio_tracks.pop(name, None)
         self.midi_tracks.pop(name, None)
         self.lyrics.pop(name, None)
+
+    # --- NUOVI METODI VIDEO ---
+    def set_video_file(self, song_name: str, file_path: str | None):
+        """Salva il percorso del file video."""
+        song_data = self.load_song(song_name)
+        if song_data is None:
+            return
+
+        song_data["video_file"] = file_path
+        self.save_song(song_name, song_data)
+
+    def get_video_file(self, song_name: str) -> str | None:
+        """Restituisce il percorso del file video associato."""
+        song_data = self.load_song(song_name)
+        if not song_data:
+            return None
+        return song_data.get("video_file", None)
+    # ---------------------------
+
+    # ... (Resto dei metodi per Audio, MIDI, Lyrics e Playlists omessi per brevità) ...
 
     def add_audio_track(self, song_name, file_path, output_index=0, channels=2, channels_used=2, output_start_channel=1, bpm=None):
         """Aggiunge una traccia audio con i dettagli dei canali usati e il BPM."""

@@ -2,14 +2,17 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QListWidget,
-    QPushButton, QFileDialog, QComboBox, QInputDialog, QMessageBox, QDoubleSpinBox
+    QPushButton, QFileDialog, QComboBox, QInputDialog, QMessageBox, QDoubleSpinBox, QLineEdit 
 )
 from PyQt6.QtCore import Qt, QTimer
 import soundfile as sf
 # Import adattati
 from ui.views.lyrics_editor_window import LyricsEditorWindow
 from ui.views.lyrics_player_window import LyricsPlayerWidget # RIFATTORIZZATO A WIDGET
-# from ui.components.midi_monitor_widget import MidiMonitorWidget  <--- RIMOSSO
+from ui.components.midi_monitor_widget import MidiMonitorWidget 
+# Import Engine e Player Video
+from engines.video_engine import VideoEngine 
+from ui.views.video_player_widget import VideoPlayerWidget 
 from core.data_manager import DataManager
 
 
@@ -17,7 +20,7 @@ class SongEditorWidget(QWidget):
     """
     Widget per la configurazione e l'editing di una singola canzone.
     """
-    def __init__(self, song_name, audio_engine, midi_engine, data_manager, settings_manager=None, lyrics_player_widget: LyricsPlayerWidget | None = None):
+    def __init__(self, song_name, audio_engine, midi_engine, data_manager, settings_manager=None, lyrics_player_widget: LyricsPlayerWidget | None = None, video_engine: VideoEngine | None = None, video_player_widget: VideoPlayerWidget | None = None):
         super().__init__()
         self.song_name = song_name
         self.audio_engine = audio_engine
@@ -26,13 +29,13 @@ class SongEditorWidget(QWidget):
         self.settings_manager = settings_manager
         self.loaded_txt_file = None
         self.current_bpm = 120.0 
+        self.video_file = None 
         
-        # Usa il widget iniettato
+        # Dipendenze media iniettate
         self.lyrics_player: LyricsPlayerWidget | None = lyrics_player_widget 
-        
-        # self.midi_monitor = MidiMonitorWidget() <--- RIMOSSO
-        # self.midi_engine.midi_message_sent.connect(self.midi_monitor.add_message) <--- RIMOSSO
-        
+        self.video_engine = video_engine
+        self.video_player = video_player_widget
+
         self.init_ui()
         self.load_song()
 
@@ -81,7 +84,6 @@ class SongEditorWidget(QWidget):
         self.midi_label = QLabel("Tracce MIDI")
         main_layout.addWidget(self.midi_label)
         self.midi_list = QListWidget()
-        self.midi_list.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu)
         main_layout.addWidget(self.midi_list)
 
         btn_midi_layout = QHBoxLayout()
@@ -93,6 +95,27 @@ class SongEditorWidget(QWidget):
         btn_midi_layout.addWidget(self.btn_edit_midi_output)
         main_layout.addLayout(btn_midi_layout)
 
+        # --- NUOVO: VIDEO TRACK ---
+        main_layout.addSpacing(10)
+        self.video_label = QLabel("Traccia Video")
+        main_layout.addWidget(self.video_label)
+        
+        video_layout = QHBoxLayout()
+        self.video_path_input = QLineEdit()
+        self.video_path_input.setReadOnly(True)
+        self.video_path_input.setPlaceholderText("Nessun file video selezionato.")
+        
+        self.btn_load_video = QPushButton("Carica Video...")
+        self.btn_clear_video = QPushButton("Rimuovi")
+        
+        self.btn_load_video.clicked.connect(self.load_video)
+        self.btn_clear_video.clicked.connect(lambda: self.set_video_path(None))
+        
+        video_layout.addWidget(self.video_path_input)
+        video_layout.addWidget(self.btn_load_video)
+        video_layout.addWidget(self.btn_clear_video)
+        main_layout.addLayout(video_layout)
+        
         # --- LYRICS CONTROLS ---
         self.lyrics_label = QLabel("Lyrics")
         main_layout.addWidget(self.lyrics_label)
@@ -124,10 +147,8 @@ class SongEditorWidget(QWidget):
         playback_layout.addWidget(self.btn_prompt_lyrics)
         main_layout.addLayout(playback_layout)
 
-        # --- MIDI Monitor --- <--- RIMOSSO
-        # main_layout.addSpacing(10)
-        # main_layout.addWidget(QLabel("--- MONITOR MIDI USCITA ---"))
-        # main_layout.addWidget(self.midi_monitor) 
+        # --- MIDI Monitor ---
+        main_layout.addSpacing(10)
         
         # --- SAVE ---
         main_layout.addWidget(QPushButton("SALVA CANZONE", clicked=self.save_song))
@@ -159,7 +180,8 @@ class SongEditorWidget(QWidget):
                 "audio_tracks": [],
                 "midi_tracks": [],
                 "lyrics": [],
-                "lyrics_txt": None
+                "lyrics_txt": None,
+                "video_file": None 
             }
 
         # --- AUDIO LIST ---
@@ -231,6 +253,12 @@ class SongEditorWidget(QWidget):
                  
              self.midi_list.addItem(f"{midi_file_info}Porta: {t['port']} | Canale MIDI: {t['channel']}")
         
+        # --- VIDEO TRACK ---
+        self.video_file = song_data.get("video_file", None)
+        if hasattr(self, 'video_path_input'): 
+            self.set_video_path(self.video_file, update_data_manager=False)
+
+
         # --- LYRICS LABEL ---
         lyrics_txt = song_data.get("lyrics_txt")
         if lyrics_txt:
@@ -245,16 +273,50 @@ class SongEditorWidget(QWidget):
     def save_song(self):
         """Salva tutti i dati della canzone, inclusi i lyrics aggiornati."""
         lyrics_data, txt_file = self.data_manager.get_lyrics_with_txt(self.song_name)
+        video_file = self.data_manager.get_video_file(self.song_name) 
 
         song_data = {
             "name": self.song_name,
             "audio_tracks": self.data_manager.audio_tracks.get(self.song_name, []),
             "midi_tracks": self.data_manager.midi_tracks.get(self.song_name, []),
+            "video_file": video_file, 
             "lyrics": lyrics_data,
             "lyrics_txt": txt_file
         }
 
         self.data_manager.save_song(self.song_name, song_data)
+
+
+    # -------------------------------------------------------------
+    # GESTIONE TRACCE VIDEO
+    # -------------------------------------------------------------
+    def load_video(self):
+        """Apre il dialogo per selezionare e impostare un file video."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Seleziona file Video",
+            filter="Video Files (*.mp4 *.avi *.mov *.mkv *.webm)" 
+        )
+        if file_path:
+            self.set_video_path(file_path)
+
+    def set_video_path(self, file_path: str | None, update_data_manager: bool = True):
+        """Aggiorna la UI e lo stato del file video."""
+        self.video_file = file_path
+        
+        if file_path:
+            display_text = file_path.split("/")[-1]
+            self.video_path_input.setText(display_text)
+            self.video_path_input.setToolTip(file_path)
+            self.video_label.setStyleSheet("font-weight: bold; color: white;") 
+        else:
+            self.video_path_input.clear()
+            self.video_path_input.setPlaceholderText("Nessun file video selezionato.")
+            self.video_path_input.setToolTip("")
+            self.video_label.setStyleSheet("font-weight: bold; color: white;") 
+
+        if update_data_manager:
+            self.data_manager.set_video_file(self.song_name, file_path)
 
 
     # -------------------------------------------------------------
@@ -537,7 +599,6 @@ class SongEditorWidget(QWidget):
             )
             self.load_song()
 
-
     # -------------------------------------------------------------
     # GESTIONE LYRICS
     # -------------------------------------------------------------
@@ -568,6 +629,7 @@ class SongEditorWidget(QWidget):
             "name": self.song_name,
             "audio_tracks": self.data_manager.audio_tracks.get(self.song_name, []),
             "midi_tracks": self.data_manager.midi_tracks.get(self.song_name, []),
+            "video_file": self.data_manager.get_video_file(self.song_name), 
             "lyrics": lyrics_data,
             "lyrics_txt": file_name
         }
@@ -638,10 +700,13 @@ class SongEditorWidget(QWidget):
         audio_tracks = self.data_manager.audio_tracks.get(self.song_name, [])
         bpm_master = audio_tracks[0].get('bpm', 120.0) if audio_tracks else 120.0
 
-        # self.midi_monitor.clear_log() <--- RIMOSSO
-
         self.audio_engine.start_playback(self.song_name)
         self.midi_engine.start_playback(self.song_name, bpm=bpm_master)
+        
+        # --- GESTIONE VIDEO ---
+        # Carica il video nel player per la sincronizzazione (lo stato è gestito dal player stesso tramite timer)
+        if self.video_player:
+             self.video_player.load_video_track(self.song_name, self.video_file)
         
         lyrics_data, _ = self.data_manager.get_lyrics_with_txt(self.song_name)
         has_lyrics = bool(lyrics_data)
@@ -655,17 +720,20 @@ class SongEditorWidget(QWidget):
 
     def stop_playback(self):
         """Ferma la riproduzione combinata (Audio/MIDI)."""
-        # current_time = self.audio_engine.get_current_time() <--- RIMOSSO
         
         self.audio_engine.stop_playback(self.song_name)
         self.midi_engine.stop_playback(self.song_name)
         
+        # --- GESTIONE VIDEO ---
+        # Lo stop deve essere chiamato sul player per pulire lo stato
+        if self.video_player:
+             # Richiamare load_video_track(None) non è necessario qui,
+             # perché il sync_playback_state del VideoPlayerWidget gestisce l'arresto e il reset del frame.
+             self.video_engine.stop()
+
         if self.lyrics_player: # Se il player è stato iniettato
             self.lyrics_player.set_lyrics_data([], "Riproduzione Ferma")
             
-        # self.midi_monitor.add_message(current_time, "[SYSTEM] Playback interrotto.") <--- RIMOSSO
-
-
     def open_lyrics_prompter(self, force_show=False):
         """Avvia la finestra LyricsPlayerWindow per la visualizzazione sincronizzata."""
         song_name_to_prompt = self.song_name

@@ -91,14 +91,10 @@ class DMXControlWidget(QWidget,
         
         # 6. Setup MIDI Control (Input)
         self.midi_controller = MIDIController(parent=self)
-        # Rimosso: la connessione MIDI viene lasciata in DMXControlWidget ma la logica di log
-        # viene spostata nella nuova tab MIDI Monitor.
         self.midi_controller.midi_message.connect(self._midi_message_router) 
         self._load_midi_settings() 
         
-        # 7. Setup UI: Inizializza il logger MIDI
-        # self.midi_log_list = QListWidget()  <--- RIMOSSO
-        # self.midi_log_list.setMaximumHeight(150)  <--- RIMOSSO
+        # 7. Setup UI: Rimosso il setup locale del MIDI log.
         
         # 8. Setup Layout del Widget
         self._setup_ui_layout()
@@ -122,17 +118,23 @@ class DMXControlWidget(QWidget,
     def _setup_ui_layout(self):
         main_layout = QHBoxLayout(self)
 
-        # --- Pannello di Controllo (Sinistra) ---
-        control_panel = self._crea_pannello_controllo()
-        main_layout.addWidget(control_panel, 1)  
+        # --- Colonna 1: Left Controls (Fixtures/DMX Status) ---
+        # Creiamo il contenitore per la colonna sinistra (peso 1)
+        left_controls_widget = self._build_left_control_column()
+        main_layout.addWidget(left_controls_widget, 1) 
 
-        # --- Fader (Destra) ---
+        # --- Fader Area (Center) ---
         self.fader_scroll = QScrollArea()
         self.fader_scroll.setWidgetResizable(True)
         self.fader_container = QWidget()
         self.fader_layout = QVBoxLayout(self.fader_container)
         self.fader_scroll.setWidget(self.fader_container)
-        main_layout.addWidget(self.fader_scroll, 3) 
+        main_layout.addWidget(self.fader_scroll, 3) # Colonna centrale ottiene 3x spazio
+
+        # --- Colonna 2: Right Controls (Scenes/Chasers) ---
+        # Creiamo il contenitore per la colonna destra (peso 1)
+        right_controls_widget = self._build_right_control_column()
+        main_layout.addWidget(right_controls_widget, 1) 
         
     def cleanup(self):
         """Esegue il salvataggio e la disconnessione quando il widget viene chiuso."""
@@ -154,25 +156,20 @@ class DMXControlWidget(QWidget,
         # We must keep the method signature because the Menu Bar calls it.
         pass
 
-    # --- UI DMX: Implementazione del Pannello di Controllo ---
-    def _crea_pannello_controllo(self):
-        group_box = QGroupBox("Gestione Controller DMX")
-        layout = QVBoxLayout(group_box)
-        
-        # 1. MIDI MONITOR (Ingresso) <--- RIMOSSO
-        # midi_group = QGroupBox("MIDI Monitor (Segnali in Ingresso)")
-        # midi_layout = QVBoxLayout(midi_group)
-        # midi_layout.addWidget(self.midi_log_list) 
-        # midi_layout.addItem(QSpacerItem(20, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)) 
-        # layout.addWidget(midi_group)
-        
-        # 2. Lista Fixture Assegnate e Rimozione
+    # --- UI DMX: Helper per costruire le colonne ---
+
+    def _build_left_control_column(self):
+        """Costruisce i widget per la colonna sinistra (Fixture & DMX Status)."""
+        widget = QWidget()
+        col_layout = QVBoxLayout(widget)
+
+        # 1a. Lista Fixture Assegnate e Rimozione
         list_group = QGroupBox(f"Fixture Assegnate: {self.universo_attivo.nome}")
         list_layout = QVBoxLayout(list_group)
 
         self.assigned_list_widget = QListWidget() 
-        self.assigned_list_widget.setMaximumHeight(100)
-        
+        list_layout.addWidget(self.assigned_list_widget, 1) # Stretch 1 for QListWidget
+
         add_remove_layout = QHBoxLayout() 
         
         self.btn_open_add_fixture = QPushButton("Aggiungi Fixture")
@@ -183,15 +180,13 @@ class DMXControlWidget(QWidget,
         
         self._update_assigned_list_ui() 
 
-        list_layout.addWidget(self.assigned_list_widget)
-
         add_remove_layout.addWidget(self.btn_open_add_fixture) 
         add_remove_layout.addWidget(self.btn_remove_instance)
         list_layout.addLayout(add_remove_layout) 
         
-        layout.addWidget(list_group)
-        
-        # 3. Stato Connessione DMX (Toggle)
+        col_layout.addWidget(list_group, 2) # Groupbox ha stretch factor 2 per spazio verticale
+
+        # 1b. Stato Connessione DMX (Toggle)
         comm_group = QGroupBox("Stato Uscita DMX")
         comm_layout = QVBoxLayout(comm_group)
 
@@ -206,10 +201,20 @@ class DMXControlWidget(QWidget,
         
         comm_layout.addWidget(self.status_label)
         comm_layout.addWidget(self.refresh_ports_btn)
-        layout.addWidget(comm_group)
+        
+        col_layout.addWidget(comm_group) # Groupbox a dimensione fissa
         self._update_dmx_status_ui() 
         
-        # 4. Gestione Scene (SEPARATO)
+        col_layout.addStretch(1) # Spazio espandibile in fondo alla Colonna 1
+
+        return widget
+
+    def _build_right_control_column(self):
+        """Costruisce i widget per la colonna destra (Scenes & Chasers)."""
+        widget = QWidget()
+        col_layout = QVBoxLayout(widget)
+
+        # 2a. Gestione Scene 
         scene_group = QGroupBox("Gestione Scene")
         scene_layout = QVBoxLayout(scene_group)
         
@@ -225,9 +230,8 @@ class DMXControlWidget(QWidget,
         
         scene_layout.addWidget(QLabel("\nScene Salvate (Doppio Click per Applicare):"))
         self.scene_list_widget = QListWidget() 
-        self.scene_list_widget.setMaximumHeight(100)
         self.scene_list_widget.doubleClicked.connect(self._applica_scena_selezionata) 
-        scene_layout.addWidget(self.scene_list_widget)
+        scene_layout.addWidget(self.scene_list_widget, 1) # Stretch 1 for QListWidget
         
         scene_list_ctrl = QHBoxLayout()
         self.btn_delete_scene = QPushButton("Cancella")
@@ -236,9 +240,9 @@ class DMXControlWidget(QWidget,
         scene_list_ctrl.addWidget(self.btn_delete_scene)
         scene_layout.addLayout(scene_list_ctrl)
         
-        layout.addWidget(scene_group) 
-        
-        # 5. Gestione Sequenze (Chaser) (NUOVO GRUPPO)
+        col_layout.addWidget(scene_group, 2) # Groupbox ha stretch factor 2
+
+        # 2b. Gestione Sequenze (Chaser) 
         chaser_group = QGroupBox("Gestione Sequenze (Chaser)")
         chaser_layout = QVBoxLayout(chaser_group)
         
@@ -253,9 +257,8 @@ class DMXControlWidget(QWidget,
         
         chaser_layout.addWidget(QLabel("\nSequenze Salvate (Seleziona per Avviare):"))
         self.chaser_list_widget = QListWidget() 
-        self.chaser_list_widget.setMaximumHeight(100)
         self.chaser_list_widget.doubleClicked.connect(self._open_chaser_editor_dialog) 
-        chaser_layout.addWidget(self.chaser_list_widget)
+        chaser_layout.addWidget(self.chaser_list_widget, 1) # Stretch 1 for QListWidget
         
         chaser_ctrl_layout = QHBoxLayout()
         self.btn_start_chaser = QPushButton("Avvia Sequenza Selezionata") 
@@ -266,10 +269,12 @@ class DMXControlWidget(QWidget,
         chaser_ctrl_layout.addWidget(self.btn_stop_chaser)
         chaser_layout.addLayout(chaser_ctrl_layout)
         
-        layout.addWidget(chaser_group) 
-        
-        layout.addItem(QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)) 
-        return group_box
+        col_layout.addWidget(chaser_group, 2) # Groupbox ha stretch factor 2
+
+        col_layout.addStretch(1) # Spazio espandibile in fondo alla Colonna 2
+
+        return widget
+
 
     # Metodi esposti a main.py dalla barra dei menu (delegati al Mixin):
     def salva_progetto_a_file(self):
@@ -298,8 +303,8 @@ class DMXControlWidget(QWidget,
          super()._handle_dmx_connection()
          
     def _midi_message_router(self, msg):
-        # La logica di log è stata spostata nella nuova tab MIDI Monitor.
-        # self._log_midi_message(msg) <--- RIMOSSO
+        # La logica di log MIDI IN è stata spostata nel tab 'MIDI Monitor'.
+        # self._log_midi_message(msg)
         self._handle_midi_message(msg) 
         
     def _open_add_fixture_dialog(self):

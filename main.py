@@ -1,7 +1,7 @@
 # main_unified.py (Entry point del software unificato)
 
 import sys
-from PyQt6.QtWidgets import QApplication, QMainWindow, QTabWidget, QStatusBar, QToolBar, QMessageBox, QLabel, QWidget, QVBoxLayout
+from PyQt6.QtWidgets import QApplication, QMainWindow, QTabWidget, QStatusBar, QMessageBox, QLabel, QWidget, QVBoxLayout
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtCore import Qt, QSize
 
@@ -9,6 +9,7 @@ from PyQt6.QtCore import Qt, QSize
 from core.data_manager import DataManager 
 from engines.audio_engine import AudioEngine
 from engines.midi_engine import MidiEngine
+from engines.video_engine import VideoEngine # Engine Video
 from ui.components.settings_manager import SettingsManager
 
 # --- 2. Import dei Componenti UI Refactorizzati (Widget) ---
@@ -16,15 +17,11 @@ from ui.views.dmx_control_widget import DMXControlWidget
 from ui.views.scenografia_daw_widget import ScenografiaDAWWidget 
 from ui.views.stage_view import StageViewWidget # Importato il widget rifattorizzato
 from ui.views.lyrics_player_window import LyricsPlayerWidget # Importato il widget lyrics rifattorizzato
-from ui.views.midi_monitor_tab_widget import MidiMonitorTabWidget # <--- NUOVO IMPORT
+from ui.views.midi_monitor_tab_widget import MidiMonitorTabWidget 
+from ui.views.video_player_widget import VideoPlayerWidget # Player Video effettivo
 
 # --- New Placeholder Widgets for new tabs ---
-class VideoPlaceholderWidget(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Video Playback (Implementazione futura)"))
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+# Rimosso VideoPlaceholderWidget
 # --- End Placeholder Widgets ---
 
 
@@ -38,11 +35,13 @@ class UnifiedMainWindow(QMainWindow):
         # --- 3. Inizializzazione Core Engines/Managers ---
         self.audio_engine = AudioEngine()
         self.midi_engine = MidiEngine() 
+        self.video_engine = VideoEngine() # NUOVO: Engine Video
         self.scenografia_data_manager = DataManager() 
         self.settings_manager = SettingsManager()
 
         # --- Stage View and Lyrics Widgets (Instantiated by MainWindow for embedding) ---
         self.stage_view_widget = StageViewWidget() 
+        
         # INJECTION POINT: Instanziazione del Lyrics Player come QWidget
         self.lyrics_player_widget = LyricsPlayerWidget(
             audio_engine=self.audio_engine, 
@@ -50,7 +49,13 @@ class UnifiedMainWindow(QMainWindow):
             settings_manager=self.settings_manager,
             parent=self
         )
-        self.video_widget = VideoPlaceholderWidget()
+        
+        # INJECTION POINT: Instanziazione del Video Player effettivo
+        self.video_player_widget = VideoPlayerWidget(
+            video_engine=self.video_engine,
+            audio_engine=self.audio_engine,
+            settings_manager=self.settings_manager
+        )
         
         # --- 4. Setup Main UI (Tabs) ---
         tab_widget = QTabWidget()
@@ -63,19 +68,21 @@ class UnifiedMainWindow(QMainWindow):
         # --- 5. Media Tab (FIRST) ---
         self.scenografia_widget = ScenografiaDAWWidget(
             audio_engine=self.audio_engine, 
-            midi_engine=self.midi_engine, 
+            midi_engine=self.midi_engine,
+            video_engine=self.video_engine, # INJECTED
             data_manager=self.scenografia_data_manager, 
             settings_manager=self.settings_manager,
             lyrics_player_widget=self.lyrics_player_widget, # INJECTED
+            video_player_widget=self.video_player_widget, # INJECTED
             parent=self
         )
         tab_widget.addTab(self.scenografia_widget, "Media")
         
         # --- 6. Video Tab (SECOND) ---
-        tab_widget.addTab(self.video_widget, "Video")
+        tab_widget.addTab(self.video_player_widget, "Video") # USA IL WIDGET EFFETTIVO
         
         # --- 7. Lyrics Tab (THIRD) ---
-        tab_widget.addTab(self.lyrics_player_widget, "Lyrics") # ADD THE ACTUAL WIDGET
+        tab_widget.addTab(self.lyrics_player_widget, "Lyrics") 
 
         # --- 8. Fixtures Tab (FOURTH) ---
         self.dmx_widget = DMXControlWidget(
@@ -87,16 +94,16 @@ class UnifiedMainWindow(QMainWindow):
         )
         tab_widget.addTab(self.dmx_widget, "Fixtures")
         
-        # --- 9. MIDI Monitor Tab (NEW) --- <--- NUOVA TAB
+        # --- 9. Stage Tab (FIFTH) ---
+        tab_widget.addTab(self.stage_view_widget, "Stage") 
+
+        # --- 10. MIDI Monitor Tab (SIXTH / ULTIMO) ---
         self.midi_monitor_tab_widget = MidiMonitorTabWidget( 
-            midi_controller=self.dmx_widget.midi_controller, # Inietta l'istanza MIDI IN
-            midi_engine=self.midi_engine, # Inietta l'istanza MIDI OUT
+            midi_controller=self.dmx_widget.midi_controller, 
+            midi_engine=self.midi_engine, 
             parent=self
         )
         tab_widget.addTab(self.midi_monitor_tab_widget, "MIDI Monitor") 
-
-        # --- 10. Stage Tab (SIXTH) ---
-        tab_widget.addTab(self.stage_view_widget, "Stage") # Embedded Stage View
 
         # --- 11. Setup Menu Bar (CENTRALE) ---
         self._setup_menu_bar()
@@ -181,23 +188,7 @@ class UnifiedMainWindow(QMainWindow):
         info_menu.addAction(info_action)
         
         # --- TOOLBAR PRINCIPALE (CONTROLLI RAPIDI) ---
-        toolbar = QToolBar("Controlli Rapidi")
-        self.addToolBar(toolbar)
-        toolbar.setIconSize(QSize(24, 24))
-        
-        # Aggiungi azioni File
-        toolbar.addAction(save_action)
-        toolbar.addAction(load_action)
-        toolbar.addSeparator()
-        
-        # Aggiungi azioni Strumenti
-        toolbar.addAction(stage_action)
-        toolbar.addAction(editor_action) 
-        toolbar.addAction(midi_map_action)
-        toolbar.addSeparator()
-        
-        # Aggiungi azione Impostazioni
-        toolbar.addAction(settings_action)
+        # Rimosso: toolbar creation and adding actions
 
 
     def _apply_style(self):
@@ -306,7 +297,7 @@ class UnifiedMainWindow(QMainWindow):
         """Gestione della chiusura unificata: pulizia DMX e stop media."""
         self.dmx_widget.cleanup()
         self.scenografia_widget.cleanup()
-        self.midi_monitor_tab_widget.cleanup() # <--- AGGIUNGI LA PULIZIA
+        self.midi_monitor_tab_widget.cleanup()
         super().closeEvent(event)
 
 if __name__ == '__main__':

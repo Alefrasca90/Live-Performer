@@ -10,9 +10,11 @@ from PyQt6.QtCore import Qt, QMimeData
 # Import dei componenti (Media/App)
 from engines.audio_engine import AudioEngine
 from engines.midi_engine import MidiEngine
+from engines.video_engine import VideoEngine # IMPORT AGGIUNTO
 from core.data_manager import DataManager as ScenografiaDataManager
 from ui.components.settings_manager import SettingsManager
-from ui.views.lyrics_player_window import LyricsPlayerWidget # Importato LyricsPlayerWidget
+from ui.views.lyrics_player_window import LyricsPlayerWidget 
+from ui.views.video_player_widget import VideoPlayerWidget # IMPORT AGGIUNTO
 
 # Import delle Views/Components
 from ui.views.song_editor_widget import SongEditorWidget
@@ -35,13 +37,15 @@ class SongListWidget(QListWidget):
 
 
 class ScenografiaDAWWidget(QWidget):
-    def __init__(self, audio_engine: AudioEngine, midi_engine: MidiEngine, data_manager: ScenografiaDataManager, settings_manager: SettingsManager, lyrics_player_widget: LyricsPlayerWidget, parent=None):
+    def __init__(self, audio_engine: AudioEngine, midi_engine: MidiEngine, video_engine: VideoEngine, data_manager: ScenografiaDataManager, settings_manager: SettingsManager, lyrics_player_widget: LyricsPlayerWidget, video_player_widget: VideoPlayerWidget, parent=None):
         super().__init__(parent)
         self.audio_engine = audio_engine
         self.midi_engine = midi_engine
+        self.video_engine = video_engine # AGGIUNTO
         self.data_manager = data_manager
         self.settings_manager = settings_manager
-        self.lyrics_player_widget = lyrics_player_widget # Store the dependency
+        self.lyrics_player_widget = lyrics_player_widget 
+        self.video_player_widget = video_player_widget # AGGIUNTO
         self.current_editor = None 
 
         self.init_ui()
@@ -131,7 +135,9 @@ class ScenografiaDAWWidget(QWidget):
             self.midi_engine,
             self.data_manager,
             self.settings_manager,
-            lyrics_player_widget=self.lyrics_player_widget # PASS THE DEPENDENCY
+            lyrics_player_widget=self.lyrics_player_widget, # INJECTED
+            video_engine=self.video_engine, # INJECTED
+            video_player_widget=self.video_player_widget # INJECTED
         )
         self.show_editor(editor)
 
@@ -144,7 +150,9 @@ class ScenografiaDAWWidget(QWidget):
             self.midi_engine,
             self.data_manager,
             self.settings_manager,
-            lyrics_player_widget=self.lyrics_player_widget # PASS THE DEPENDENCY
+            lyrics_player_widget=self.lyrics_player_widget, # INJECTED
+            video_engine=self.video_engine, # INJECTED
+            video_player_widget=self.video_player_widget # INJECTED
         )
         self.show_editor(editor)
 

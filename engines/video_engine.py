@@ -26,6 +26,11 @@ class VideoTrack:
         self.video_widget = widget
         self.player.setVideoOutput(widget)
 
+    def _ensure_widget_output(self):
+        """Metodo aggiunto per forzare la riconnessione del widget prima di riproduzione/seek."""
+        if self.video_widget and self.player.videoOutput() is None:
+             self.player.setVideoOutput(self.video_widget)
+
     def set_volume(self, volume: float):
         self.audio_output.setVolume(volume)
 
@@ -48,6 +53,9 @@ class VideoEngine(QObject):
 
     def clear_videos(self):
         """Rimuove tutti i VideoTrack dalla lista."""
+        # Prima di cancellare, resettiamo l'output per evitare crash.
+        for v in self.videos:
+             v.player.setVideoOutput(None)
         self.videos.clear()
 
     # ---------------------------------------------------
@@ -57,11 +65,13 @@ class VideoEngine(QObject):
     def play(self):
         """Play sincronizzato di tutti i video."""
         for v in self.videos:
+            v._ensure_widget_output() # Assicuriamo che l'output sia settato
             v.player.play()
 
     def pause(self):
         """Pausa tutti i video."""
         for v in self.videos:
+            v._ensure_widget_output()
             v.player.pause()
 
     def stop(self):
@@ -72,6 +82,7 @@ class VideoEngine(QObject):
     def seek(self, ms: int):
         """Imposta la posizione in millisecondi per tutti i video."""
         for v in self.videos:
+            v._ensure_widget_output()
             v.player.setPosition(ms)
 
     # ---------------------------------------------------
@@ -81,6 +92,7 @@ class VideoEngine(QObject):
     def sync_to_position(self, ms: int):
         """Forza i video ad andare al tempo specificato (seek forzato)."""
         for v in self.videos:
+            v._ensure_widget_output() # Assicuriamo che l'output sia settato
             # Tolleranza 40 ms
             delta = abs(v.player.position() - ms)
             if delta > 40:
@@ -99,6 +111,9 @@ class VideoEngine(QObject):
                 print("⚠️ No video widget assegnato a questo video.")
                 return
 
+            # Esegui la stessa logica di re-associazione prima di forzare il fullscreen
+            track._ensure_widget_output() 
+            
             window = track.video_widget.window()
             window.windowHandle().setScreen(screen)
             window.showFullScreen()
