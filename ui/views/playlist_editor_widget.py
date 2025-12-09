@@ -8,6 +8,7 @@ from PyQt6.QtCore import Qt, QMimeData, QTimer, QPoint
 from PyQt6.QtGui import QMouseEvent
 # Import adattato
 from ui.views.lyrics_player_window import LyricsPlayerWindow 
+from core.data_manager import DataManager # AGGIORNATO: Importa l'unico gestore
 
 class PlaylistListWidget(QListWidget):
     """QListWidget customizzato per accettare il drag and drop di nomi di canzoni e riordinare."""

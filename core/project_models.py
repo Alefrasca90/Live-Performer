@@ -43,8 +43,7 @@ class UniversoStato:
         self.midi_channel = midi_channel # 0 = ALL, 1-16 = Canale Specifico
         # L'attributo è ora 'midi_controller_port_name' per salvare la porta MIDI usata
         self.midi_controller_port_name = midi_controller_port_name 
-        self.dmx_port_name = dmx_port_name # NUOVO: Porta DMX (Es: COM5)
-        
+        self.dmx_port_name = dmx_port_name # NUOVO: Porta DMX (Es: COM5)  
     def __repr__(self):
         return f"UniversoStato(ID={self.id_universo}, nome='{self.nome}', fixture_count={len(self.istanze_stato)})"
 

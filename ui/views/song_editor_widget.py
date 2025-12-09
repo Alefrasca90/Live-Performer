@@ -10,6 +10,7 @@ import soundfile as sf
 from ui.views.lyrics_editor_window import LyricsEditorWindow
 from ui.views.lyrics_player_window import LyricsPlayerWindow 
 from ui.components.midi_monitor_widget import MidiMonitorWidget 
+from core.data_manager import DataManager # AGGIORNATO: Importa l'unico gestore
 
 
 class SongEditorWidget(QWidget):

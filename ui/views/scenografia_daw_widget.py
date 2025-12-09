@@ -1,5 +1,3 @@
-# ui/views/scenografia_daw_widget.py
-
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QLabel,
     QPushButton, QSplitter, QInputDialog, QMessageBox
@@ -10,13 +8,13 @@ from PyQt6.QtCore import Qt, QMimeData
 # Import dei componenti (Media/App)
 from engines.audio_engine import AudioEngine
 from engines.midi_engine import MidiEngine
-from data_manager import DataManager as ScenografiaDataManager
+from core.data_manager import DataManager as ScenografiaDataManager # AGGIORNATO: Importa l'unico gestore
 from ui.components.settings_manager import SettingsManager
 
 # Import delle Views/Components
 from ui.views.song_editor_widget import SongEditorWidget
 from ui.components.settings_dialog import SettingsDialog
-from ui.views.playlist_editor_widget import PlaylistEditorWidget 
+from ui.views.playlist_editor_widget import PlaylistEditorWidget
 
 
 class SongListWidget(QListWidget):

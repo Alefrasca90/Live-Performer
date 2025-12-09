@@ -5,13 +5,12 @@ from PyQt6.QtWidgets import QApplication, QMainWindow, QTabWidget, QStatusBar
 from PyQt6.QtCore import Qt
 
 # --- 1. Import dei Componenti Core ---
-# DMX Core (Project Data Manager)
-from core.data_manager import DataManager as DMXDataManager 
+# DMX Core (Project Data Manager) - UNIFICATO
+from core.data_manager import DataManager 
 
 # Scenografia Core (Media Engines e Data Manager)
 from engines.audio_engine import AudioEngine
 from engines.midi_engine import MidiEngine
-from data_manager import DataManager as ScenografiaDataManager # Alias per Media DataManager
 from ui.components.settings_manager import SettingsManager
 
 # --- 2. Import dei Componenti UI Refactorizzati (Widget) ---
@@ -29,7 +28,7 @@ class UnifiedMainWindow(QMainWindow):
         # --- 3. Inizializzazione Core Engines/Managers ---
         self.audio_engine = AudioEngine()
         self.midi_engine = MidiEngine() # Engine Output MIDI/Clock (Scenografia)
-        self.scenografia_data_manager = ScenografiaDataManager()
+        self.scenografia_data_manager = DataManager() # USIAMO IL GESTORE UNIFICATO
         self.settings_manager = SettingsManager()
         
         # --- 4. Setup Main UI (Tabs) ---
