@@ -1,3 +1,5 @@
+# ui/views/video_player_widget.py
+
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QSizePolicy
 from PyQt6.QtCore import Qt, QUrl, QTimer, QPoint
 from PyQt6.QtMultimediaWidgets import QVideoWidget
@@ -71,7 +73,7 @@ class VideoPlayerWidget(QWidget):
              
              self.status_label.setText(error_message)
              self.status_label.show()
-             print(error_message)
+             print(f"⚠️ VIDEO PLAYER ERRORE FATALE: {error_message}") # Aggiunta linea di debug
 
     def load_video_track(self, song_name: str | None, video_path: str | None):
         """
@@ -80,19 +82,25 @@ class VideoPlayerWidget(QWidget):
         """
         is_new_path = video_path != self.current_video_path or not self.video_engine.videos
         
+        print(f"--- Video Load Start for Song: {song_name} ---") # Debug: Start Load
+        
         self.current_song_name = song_name
         self.current_video_path = video_path
 
         if is_new_path:
+            print("DEBUG: New path or no existing track. Clearing old tracks.") # Debug: Clearing
             self.video_engine.clear_videos()
 
         if video_path:
+            print(f"DEBUG: Attempting to load video file: {video_path}") # Debug: Path attempt
             try:
                 if is_new_path:
                     track = self.video_engine.add_video(video_path)
                     track.set_widget(self.video_widget)
                     track.set_volume(0.0) 
                     track.player.errorOccurred.connect(self._handle_player_error)
+                    
+                    print(f"DEBUG: Track added. Video Source: {track.player.source()}") # Debug: Source URI
                     
                 self.status_label.setText(f"Video caricato: {video_path.split('/')[-1]}")
                 self.status_label.show() 
@@ -104,13 +112,19 @@ class VideoPlayerWidget(QWidget):
                      self.video_engine.seek(0)
                      self.video_widget.repaint() # Forziamo un redraw del widget
                      
+                     print("DEBUG: Initial Play/Pause/Seek(0) sequence executed.") # Debug: Play/Pause sequence
+                     
             except Exception as e:
                 self.status_label.setText(f"Errore caricamento video: {e}")
                 self.status_label.show()
+                print(f"⚠️ VIDEO LOAD EXCEPTION: {e}") # Debug: Load Exception
         else:
             self.status_label.setText("Nessun video caricato.")
             self.status_label.show()
+            print("DEBUG: Video path is None. Player is idle.") # Debug: Path None
             
+        print(f"--- Video Load End ---") # Debug: End Load
+
     def sync_playback_state(self):
         """Sincronizza lo stato di riproduzione (Play/Stop/Seek) con AudioEngine."""
         
@@ -123,6 +137,7 @@ class VideoPlayerWidget(QWidget):
                  self.video_engine.seek(0)
                  self.status_label.setText(f"Video in Stop: {self.current_video_path.split('/')[-1]}")
                  self.status_label.show()
+                 print("DEBUG SYNC: Audio stopped or song ended. Stopping video player.") # Debug: Stop
             elif not has_video_track and self.audio_engine.playing_song and self.current_video_path is None:
                  self.status_label.setText("Nessun video associato al brano.")
                  self.status_label.show()

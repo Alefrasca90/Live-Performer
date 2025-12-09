@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer
 import soundfile as sf
+import os
 # Import adattati
 from ui.views.lyrics_editor_window import LyricsEditorWindow
 from ui.views.lyrics_player_window import LyricsPlayerWidget # RIFATTORIZZATO A WIDGET
@@ -228,8 +229,11 @@ class SongEditorWidget(QWidget):
                  channel_range = f"{output_start_channel}"
 
 
+            # Utilizza os.sep per uno split più robusto sui percorsi locali
+            file_name = t['file'].split(os.sep)[-1]
+
             self.audio_list.addItem(
-                f"{t['file'].split('/')[-1]} -> Output: {output_name} ({output_channels_count} ch) | Canali Sorgente Usati: {track_channels_used} -> Output Ch: {channel_range}{bpm_info}"
+                f"{file_name} -> Output: {output_name} ({output_channels_count} ch) | Canali Sorgente Usati: {track_channels_used} -> Output Ch: {channel_range}{bpm_info}"
             )
 
         # --- MIDI LIST ---
@@ -249,7 +253,9 @@ class SongEditorWidget(QWidget):
             
              midi_file_info = ""
              if t.get('file'):
-                  midi_file_info = f"File: {t['file'].split('/')[-1]} | "
+                  # Utilizza os.sep per uno split più robusto sui percorsi locali
+                  file_name = t['file'].split(os.sep)[-1]
+                  midi_file_info = f"File: {file_name} | "
                  
              self.midi_list.addItem(f"{midi_file_info}Porta: {t['port']} | Canale MIDI: {t['channel']}")
         
@@ -299,13 +305,16 @@ class SongEditorWidget(QWidget):
         )
         if file_path:
             self.set_video_path(file_path)
+            # AGGIUNTO: Ricarica la canzone per aggiornare il percorso video con quello stabile (copiato)
+            self.load_song()
 
     def set_video_path(self, file_path: str | None, update_data_manager: bool = True):
         """Aggiorna la UI e lo stato del file video."""
         self.video_file = file_path
         
         if file_path:
-            display_text = file_path.split("/")[-1]
+            # Usiamo os.sep per il path splitting che è più robusto di '/'
+            display_text = file_path.split(os.sep)[-1]
             self.video_path_input.setText(display_text)
             self.video_path_input.setToolTip(file_path)
             self.video_label.setStyleSheet("font-weight: bold; color: white;") 
@@ -316,6 +325,7 @@ class SongEditorWidget(QWidget):
             self.video_label.setStyleSheet("font-weight: bold; color: white;") 
 
         if update_data_manager:
+            # Chiama il set_video_file su DataManager, che ora si occupa della copia
             self.data_manager.set_video_file(self.song_name, file_path)
 
 
@@ -357,6 +367,7 @@ class SongEditorWidget(QWidget):
                 current_audio_tracks_count = len(self.data_manager.audio_tracks.get(self.song_name, []))
                 bpm_to_save = self.current_bpm if current_audio_tracks_count == 0 else None
                 
+                # add_audio_track ora si occupa di COPIARE il file e salvare il nuovo percorso
                 self.data_manager.add_audio_track(
                     self.song_name, 
                     f, 
@@ -365,13 +376,6 @@ class SongEditorWidget(QWidget):
                     channels_used=default_channels_used,
                     output_start_channel=default_output_start_channel,
                     bpm=bpm_to_save
-                )
-                self.audio_engine.add_track(
-                    self.song_name, 
-                    f, 
-                    default_output_index,
-                    channels_used=default_channels_used,
-                    output_start_channel=default_output_start_channel 
                 )
             
         self.load_song()
@@ -421,7 +425,7 @@ class SongEditorWidget(QWidget):
         output_selected, ok = QInputDialog.getItem(
             self,
             "Seleziona Output Audio",
-            f"Seleziona dispositivo per '{track['file'].split('/')[-1]}':",
+            f"Seleziona dispositivo per '{track['file'].split(os.sep)[-1]}':",
             output_options,
             editable=False,
             current=default_output_index if default_output_index >= 0 else 0
@@ -513,7 +517,7 @@ class SongEditorWidget(QWidget):
         if not file_path:
             return
             
-        file_name = file_path.split("/")[-1]
+        file_name = file_path.split(os.sep)[-1]
 
         # 2. SELEZIONE PORTA E CANALE
         next_channel = (self.midi_list.count() % 16) + 1
@@ -532,7 +536,7 @@ class SongEditorWidget(QWidget):
         )
         
         if ok and port_name:
-            # 3. Aggiorna DataManager e MidiEngine (passando il percorso del file)
+            # 3. Aggiorna DataManager (add_midi_track ora si occupa della copia del file)
             self.data_manager.add_midi_track(self.song_name, next_channel, port_name, file_path=file_path)
             self.load_song()
             
@@ -612,7 +616,7 @@ class SongEditorWidget(QWidget):
         if not file_path:
             return
 
-        file_name = file_path[0].split("/")[-1]
+        file_name = file_path[0].split(os.sep)[-1]
 
         with open(file_path[0], "r", encoding="utf-8") as f:
             lyrics_data = [

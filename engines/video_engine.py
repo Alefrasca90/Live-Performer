@@ -10,7 +10,9 @@ class VideoTrack:
     def __init__(self, video_path: str):
         self.path = video_path
 
-        self.player = QMediaPlayer(None, QMediaPlayer.Flags.StreamPlayback)
+        # FIX: Rimosso QMediaPlayer.Flags.StreamPlayback per risolvere l'errore di compatibilità.
+        # Nelle versioni recenti di PyQt6, i flag di default sono spesso sufficienti.
+        self.player = QMediaPlayer() 
         self.audio_output = QAudioOutput()
         self.player.setAudioOutput(self.audio_output)
 

@@ -6,6 +6,7 @@
 import json
 import os
 from pathlib import Path
+import shutil 
 from core.dmx_models import FixtureModello, CanaleDMX, Scena, Chaser, PassoChaser
 from core.project_models import Progetto, UniversoStato, IstanzaFixtureStato, MidiMapping
 
@@ -40,8 +41,6 @@ class DataManager:
     # --- DMX / PROJECT / FIXTURE MODELS MANAGEMENT (STATIC) ---
     # =============================================================
     
-    # ... (Metodi DMX Statici omessi per brevità) ...
-
     @staticmethod
     def _modello_to_dict(modello: FixtureModello) -> dict:
         canali = [
@@ -242,6 +241,30 @@ class DataManager:
              
         return Progetto(universi_stato=universi_stato)
 
+    # --- METODO AGGIUNTO: Copia file ---
+    def _copy_file_to_song_folder(self, song_name: str, source_path: str) -> str:
+        """Copia il file sorgente in una sottocartella dedicata alla canzone e restituisce il nuovo percorso assoluto."""
+        song_media_dir = Path(self.songs_dir) / song_name
+        song_media_dir.mkdir(exist_ok=True) # Crea la cartella data/songs/[song_name]/
+
+        file_name = Path(source_path).name
+        destination_path = song_media_dir / file_name
+        
+        # Copia il file solo se la sorgente non è già la destinazione
+        if Path(source_path).resolve() != destination_path.resolve():
+            try:
+                # Usa shutil.copy2 per preservare i metadati
+                shutil.copy2(source_path, destination_path)
+                print(f"File copiato in: {destination_path}")
+            except Exception as e:
+                print(f"ATTENZIONE: Errore durante la copia del file {source_path}: {e}")
+                # In caso di errore di copia, restituisce il percorso originale
+                return source_path
+
+        # Restituisce il percorso assoluto della copia locale
+        return str(destination_path.resolve())
+
+
     # --- GESTIONE CANZONI / PLAYLISTS (Metodi di istanza) ---
     
     def get_songs(self):
@@ -324,18 +347,33 @@ class DataManager:
         path = os.path.join(self.songs_dir, f"{name}{self.song_extension}")
         if os.path.exists(path):
             os.remove(path)
+            
+        # Pulisce anche la cartella media dedicata al brano
+        song_media_dir = Path(self.songs_dir) / name
+        if song_media_dir.exists() and song_media_dir.is_dir():
+            try:
+                shutil.rmtree(song_media_dir)
+                print(f"Cartella media brano eliminata: {song_media_dir}")
+            except Exception as e:
+                print(f"ATTENZIONE: Impossibile eliminare la cartella media del brano {name}: {e}")
+                
+
         self.audio_tracks.pop(name, None)
         self.midi_tracks.pop(name, None)
         self.lyrics.pop(name, None)
 
     # --- NUOVI METODI VIDEO ---
     def set_video_file(self, song_name: str, file_path: str | None):
-        """Salva il percorso del file video."""
+        """Salva il percorso del file video, copiandolo localmente se necessario."""
         song_data = self.load_song(song_name)
         if song_data is None:
             return
+            
+        new_file_path = file_path
+        if file_path:
+             new_file_path = self._copy_file_to_song_folder(song_name, file_path) # Copia file
 
-        song_data["video_file"] = file_path
+        song_data["video_file"] = new_file_path
         self.save_song(song_name, song_data)
 
     def get_video_file(self, song_name: str) -> str | None:
@@ -346,12 +384,14 @@ class DataManager:
         return song_data.get("video_file", None)
     # ---------------------------
 
-    # ... (Resto dei metodi per Audio, MIDI, Lyrics e Playlists omessi per brevità) ...
-
+    # --- GESTIONE TRACCE AUDIO ---
     def add_audio_track(self, song_name, file_path, output_index=0, channels=2, channels_used=2, output_start_channel=1, bpm=None):
-        """Aggiunge una traccia audio con i dettagli dei canali usati e il BPM."""
+        """Aggiunge una traccia audio con i dettagli dei canali usati e il BPM, copiando il file localmente."""
+        
+        new_file_path = self._copy_file_to_song_folder(song_name, file_path) # Copia file
+
         self.audio_tracks.setdefault(song_name, []).append({
-            "file": file_path,
+            "file": new_file_path, # Usa il nuovo percorso
             "output": output_index,
             "channels": channels,         
             "channels_used": channels_used, 
@@ -377,9 +417,18 @@ class DataManager:
                  track["bpm"] = bpm 
             self.save_song(song_name)
 
+    # --- GESTIONE TRACCE MIDI ---
     def add_midi_track(self, song_name, channel, port=None, file_path=None):
-        """Aggiunge una traccia MIDI con percorso del file."""
-        self.midi_tracks.setdefault(song_name, []).append({"file": file_path, "channel": channel, "port": port})
+        """Aggiunge una traccia MIDI con percorso del file, copiando il file localmente."""
+        new_file_path = file_path
+        if file_path:
+            new_file_path = self._copy_file_to_song_folder(song_name, file_path) # Copia file
+            
+        self.midi_tracks.setdefault(song_name, []).append({
+            "file": new_file_path, # Usa il nuovo percorso
+            "channel": channel, 
+            "port": port
+        })
         self.save_song(song_name)
 
     def remove_midi_track(self, song_name, index):
@@ -395,6 +444,7 @@ class DataManager:
             self.midi_tracks[song_name][index]["channel"] = channel
             self.save_song(song_name)
 
+    # --- GESTIONE LYRICS ---
     def save_lyrics(self, song_name: str, lyrics_list: list[dict]):
         """Salva le lyrics aggiornate (formato con timestamp) sul file .scn."""
         song_data = self.load_song(song_name)
@@ -436,6 +486,7 @@ class DataManager:
 
         return lyrics, txt
 
+    # --- GESTIONE PLAYLISTS ---
     def get_playlists(self):
         """Restituisce la lista dei nomi delle playlist."""
         if not os.path.exists(self.playlists_dir):
