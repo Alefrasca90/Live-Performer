@@ -9,7 +9,7 @@ import soundfile as sf
 # Import adattati
 from ui.views.lyrics_editor_window import LyricsEditorWindow
 from ui.views.lyrics_player_window import LyricsPlayerWidget # RIFATTORIZZATO A WIDGET
-from ui.components.midi_monitor_widget import MidiMonitorWidget 
+# from ui.components.midi_monitor_widget import MidiMonitorWidget  <--- RIMOSSO
 from core.data_manager import DataManager
 
 
@@ -30,8 +30,8 @@ class SongEditorWidget(QWidget):
         # Usa il widget iniettato
         self.lyrics_player: LyricsPlayerWidget | None = lyrics_player_widget 
         
-        self.midi_monitor = MidiMonitorWidget()
-        self.midi_engine.midi_message_sent.connect(self.midi_monitor.add_message)
+        # self.midi_monitor = MidiMonitorWidget() <--- RIMOSSO
+        # self.midi_engine.midi_message_sent.connect(self.midi_monitor.add_message) <--- RIMOSSO
         
         self.init_ui()
         self.load_song()
@@ -124,10 +124,10 @@ class SongEditorWidget(QWidget):
         playback_layout.addWidget(self.btn_prompt_lyrics)
         main_layout.addLayout(playback_layout)
 
-        # --- MIDI Monitor ---
-        main_layout.addSpacing(10)
-        main_layout.addWidget(QLabel("--- MONITOR MIDI USCITA ---"))
-        main_layout.addWidget(self.midi_monitor) 
+        # --- MIDI Monitor --- <--- RIMOSSO
+        # main_layout.addSpacing(10)
+        # main_layout.addWidget(QLabel("--- MONITOR MIDI USCITA ---"))
+        # main_layout.addWidget(self.midi_monitor) 
         
         # --- SAVE ---
         main_layout.addWidget(QPushButton("SALVA CANZONE", clicked=self.save_song))
@@ -638,7 +638,7 @@ class SongEditorWidget(QWidget):
         audio_tracks = self.data_manager.audio_tracks.get(self.song_name, [])
         bpm_master = audio_tracks[0].get('bpm', 120.0) if audio_tracks else 120.0
 
-        self.midi_monitor.clear_log() 
+        # self.midi_monitor.clear_log() <--- RIMOSSO
 
         self.audio_engine.start_playback(self.song_name)
         self.midi_engine.start_playback(self.song_name, bpm=bpm_master)
@@ -655,7 +655,7 @@ class SongEditorWidget(QWidget):
 
     def stop_playback(self):
         """Ferma la riproduzione combinata (Audio/MIDI)."""
-        current_time = self.audio_engine.get_current_time()
+        # current_time = self.audio_engine.get_current_time() <--- RIMOSSO
         
         self.audio_engine.stop_playback(self.song_name)
         self.midi_engine.stop_playback(self.song_name)
@@ -663,7 +663,7 @@ class SongEditorWidget(QWidget):
         if self.lyrics_player: # Se il player è stato iniettato
             self.lyrics_player.set_lyrics_data([], "Riproduzione Ferma")
             
-        self.midi_monitor.add_message(current_time, "[SYSTEM] Playback interrotto.")
+        # self.midi_monitor.add_message(current_time, "[SYSTEM] Playback interrotto.") <--- RIMOSSO
 
 
     def open_lyrics_prompter(self, force_show=False):

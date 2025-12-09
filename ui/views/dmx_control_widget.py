@@ -91,12 +91,14 @@ class DMXControlWidget(QWidget,
         
         # 6. Setup MIDI Control (Input)
         self.midi_controller = MIDIController(parent=self)
+        # Rimosso: la connessione MIDI viene lasciata in DMXControlWidget ma la logica di log
+        # viene spostata nella nuova tab MIDI Monitor.
         self.midi_controller.midi_message.connect(self._midi_message_router) 
         self._load_midi_settings() 
         
         # 7. Setup UI: Inizializza il logger MIDI
-        self.midi_log_list = QListWidget() 
-        self.midi_log_list.setMaximumHeight(150)
+        # self.midi_log_list = QListWidget()  <--- RIMOSSO
+        # self.midi_log_list.setMaximumHeight(150)  <--- RIMOSSO
         
         # 8. Setup Layout del Widget
         self._setup_ui_layout()
@@ -157,14 +159,12 @@ class DMXControlWidget(QWidget,
         group_box = QGroupBox("Gestione Controller DMX")
         layout = QVBoxLayout(group_box)
         
-        # 1. MIDI MONITOR (Ingresso)
-        midi_group = QGroupBox("MIDI Monitor (Segnali in Ingresso)")
-        midi_layout = QVBoxLayout(midi_group)
-        
-        midi_layout.addWidget(self.midi_log_list) 
-        midi_layout.addItem(QSpacerItem(20, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)) 
-        
-        layout.addWidget(midi_group)
+        # 1. MIDI MONITOR (Ingresso) <--- RIMOSSO
+        # midi_group = QGroupBox("MIDI Monitor (Segnali in Ingresso)")
+        # midi_layout = QVBoxLayout(midi_group)
+        # midi_layout.addWidget(self.midi_log_list) 
+        # midi_layout.addItem(QSpacerItem(20, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)) 
+        # layout.addWidget(midi_group)
         
         # 2. Lista Fixture Assegnate e Rimozione
         list_group = QGroupBox(f"Fixture Assegnate: {self.universo_attivo.nome}")
@@ -298,7 +298,8 @@ class DMXControlWidget(QWidget,
          super()._handle_dmx_connection()
          
     def _midi_message_router(self, msg):
-        self._log_midi_message(msg)
+        # La logica di log è stata spostata nella nuova tab MIDI Monitor.
+        # self._log_midi_message(msg) <--- RIMOSSO
         self._handle_midi_message(msg) 
         
     def _open_add_fixture_dialog(self):

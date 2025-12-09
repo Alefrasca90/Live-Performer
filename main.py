@@ -16,6 +16,7 @@ from ui.views.dmx_control_widget import DMXControlWidget
 from ui.views.scenografia_daw_widget import ScenografiaDAWWidget 
 from ui.views.stage_view import StageViewWidget # Importato il widget rifattorizzato
 from ui.views.lyrics_player_window import LyricsPlayerWidget # Importato il widget lyrics rifattorizzato
+from ui.views.midi_monitor_tab_widget import MidiMonitorTabWidget # <--- NUOVO IMPORT
 
 # --- New Placeholder Widgets for new tabs ---
 class VideoPlaceholderWidget(QWidget):
@@ -86,13 +87,21 @@ class UnifiedMainWindow(QMainWindow):
         )
         tab_widget.addTab(self.dmx_widget, "Fixtures")
         
-        # --- 9. Stage Tab (FIFTH) ---
+        # --- 9. MIDI Monitor Tab (NEW) --- <--- NUOVA TAB
+        self.midi_monitor_tab_widget = MidiMonitorTabWidget( 
+            midi_controller=self.dmx_widget.midi_controller, # Inietta l'istanza MIDI IN
+            midi_engine=self.midi_engine, # Inietta l'istanza MIDI OUT
+            parent=self
+        )
+        tab_widget.addTab(self.midi_monitor_tab_widget, "MIDI Monitor") 
+
+        # --- 10. Stage Tab (SIXTH) ---
         tab_widget.addTab(self.stage_view_widget, "Stage") # Embedded Stage View
 
-        # --- 10. Setup Menu Bar (CENTRALE) ---
+        # --- 11. Setup Menu Bar (CENTRALE) ---
         self._setup_menu_bar()
         
-        # --- 11. Applica Stile Comune ---
+        # --- 12. Applica Stile Comune ---
         self._apply_style()
 
     def _setup_menu_bar(self):
@@ -297,6 +306,7 @@ class UnifiedMainWindow(QMainWindow):
         """Gestione della chiusura unificata: pulizia DMX e stop media."""
         self.dmx_widget.cleanup()
         self.scenografia_widget.cleanup()
+        self.midi_monitor_tab_widget.cleanup() # <--- AGGIUNGI LA PULIZIA
         super().closeEvent(event)
 
 if __name__ == '__main__':
