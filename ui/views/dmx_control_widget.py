@@ -7,14 +7,17 @@ from PyQt6.QtWidgets import (
     QSpacerItem, QSizePolicy, QLineEdit, QListWidget, QCheckBox, QScrollArea, QSlider
 )
 from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QAction # Import QAction per la compatibilità dei segnali
 
 # Import dei componenti Core del Progetto (DMX)
 from core.dmx_models import FixtureModello, IstanzaFixture, Scena, PassoChaser, Chaser 
 from core.dmx_universe import UniversoDMX
-from core.data_manager import DataManager # DataManager per DMX (Project, Models)
+from core.data_manager import DataManager 
 from core.dmx_comm import DMXController 
 from core.project_models import Progetto, UniversoStato, MidiMapping
-from core.midi_comm import MIDIController # Controller MIDI Input (per mappature)
+from core.midi_comm import MIDIController 
+from ui.components.settings_manager import SettingsManager # Nuovo
+from ui.components.settings_dialog import SettingsDialog # Nuovo
 
 # Import dei componenti UI (DMX) dalla cartella components/
 from ui.components.fixture_editor import FixtureEditorDialog 
@@ -39,8 +42,14 @@ class DMXControlWidget(QWidget,
                      SceneChaserMixin,
                      MIDIControlMixin):
     
-    def __init__(self, parent=None):
+    # ACCETTA I CORE OBJECTS COME PARAMETRI
+    def __init__(self, audio_engine, midi_engine, settings_manager, parent=None):
         super().__init__(parent)
+        
+        # Assegna i motori condivisi (necessari per i Mixin e le finestre di dialogo)
+        self.audio_engine = audio_engine 
+        self.midi_engine = midi_engine 
+        self.settings_manager = settings_manager 
         
         # 1. Carica Modelli Fixture e Progetto (Logica locale per Mixins)
         self.fixture_modelli: list[FixtureModello] = DataManager.carica_modelli()
@@ -63,9 +72,8 @@ class DMXControlWidget(QWidget,
              self.universo_attivo = next(iter(self.universi.values()))
 
         # 3. DMX Controller
-        # CARICA LA PORTA DMX DALLO STATO DEL PROGETTO
         current_u_state = next((u for u in self.progetto.universi_stato if u.id_universo == self.universo_attivo.id_universo), Progetto.crea_vuoto().universi_stato[0])
-        dmx_port = getattr(current_u_state, 'dmx_port_name', 'COM5') # Prende il nuovo campo o il default
+        dmx_port = getattr(current_u_state, 'dmx_port_name', 'COM5') 
         
         self.dmx_comm = DMXController(port_name=dmx_port) 
         self.dmx_comm.connect() 
@@ -83,7 +91,6 @@ class DMXControlWidget(QWidget,
         
         # 6. Setup MIDI Control (Input)
         self.midi_controller = MIDIController(parent=self)
-        # Il router invia il messaggio sia al log che alla logica di mappatura
         self.midi_controller.midi_message.connect(self._midi_message_router) 
         self._load_midi_settings() 
         
@@ -101,7 +108,7 @@ class DMXControlWidget(QWidget,
         self.popola_controlli_fader()
         self.dmx_comm.send_dmx_packet(self.universo_attivo.array_canali)
 
-    # Questo metodo sostituisce la vecchia _setup_ui, ora è solo il layout principale del Widget
+
     def _setup_ui_layout(self):
         main_layout = QHBoxLayout(self)
 
@@ -116,12 +123,6 @@ class DMXControlWidget(QWidget,
         self.fader_layout = QVBoxLayout(self.fader_container)
         self.fader_scroll.setWidget(self.fader_container)
         main_layout.addWidget(self.fader_scroll, 3) 
-
-        # Aggiungiamo un Pulsante di Salvataggio rapido per la tab
-        save_btn = QPushButton("Salva Configurazione DMX (Fader, Scene, Posizioni)")
-        save_btn.clicked.connect(self._salva_stato_progetto)
-        main_layout.addWidget(save_btn)
-        main_layout.setStretchFactor(save_btn, 0)
         
     def cleanup(self):
         """Esegue il salvataggio e la disconnessione quando il widget viene chiuso."""
@@ -132,22 +133,13 @@ class DMXControlWidget(QWidget,
         if self.stage_view:
             self.stage_view.close()
             
-    # La logica del menu bar (ora toolbar) è stata spostata nel metodo _crea_pannello_controllo
-    # come Pulsanti che aprono i dialog
-    def _setup_toolbar(self):
-        # Questo metodo viene chiamato dal vecchio codice ma non è più necessario
-        # dato che i pulsanti sono nel pannello di controllo. Lasciamo vuoto per compatibilità
-        pass
-
-    # Metodi ausiliari per la UI (ripristinati come nell'originale, ma ora in un mixin o nella classe)
-    # L'implementazione completa di _crea_pannello_controllo è qui sotto.
-
+    # Metodi ausiliari di UI/Logica per il Mixin (alcuni sono ereditati, altri delegati)
     def _midi_message_router(self, msg):
         """Reindirizza il messaggio MIDI al logger e al gestore di mappatura (dal Mixin)."""
         self._log_midi_message(msg)
         self._handle_midi_message(msg) 
-        
-    # Implementazioni dei dialoghi ausiliari dal vecchio main_window (necessari per i mixins)
+
+    # Implementazioni dei dialoghi ausiliari (DELEGATE AI METODI DEI MIXIN O LOCALI)
     def _open_stage_view(self):
         self._open_stage_view_impl()
 
@@ -183,9 +175,8 @@ class DMXControlWidget(QWidget,
         dialog.chaser_saved.connect(self._handle_chaser_saved)
         dialog.exec()
 
-    # --- UI DMX ---
+    # --- UI DMX: Implementazione del Pannello di Controllo ---
     def _crea_pannello_controllo(self):
-        """Metodo che crea l'intero pannello di controllo DMX a sinistra/sotto."""
         group_box = QGroupBox("Gestione Controller DMX")
         layout = QVBoxLayout(group_box)
         
@@ -193,7 +184,6 @@ class DMXControlWidget(QWidget,
         midi_group = QGroupBox("MIDI Monitor (Segnali in Ingresso)")
         midi_layout = QVBoxLayout(midi_group)
         
-        # Usa la QListWidget creata in __init__
         midi_layout.addWidget(self.midi_log_list) 
         midi_layout.addItem(QSpacerItem(20, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)) 
         
@@ -206,10 +196,8 @@ class DMXControlWidget(QWidget,
         self.assigned_list_widget = QListWidget() 
         self.assigned_list_widget.setMaximumHeight(100)
         
-        # Layout Pulsanti (Aggiungi/Rimuovi)
         add_remove_layout = QHBoxLayout() 
         
-        # Pulsante che apre il Dialog per l'aggiunta
         self.btn_open_add_fixture = QPushButton("Aggiungi Fixture")
         self.btn_open_add_fixture.clicked.connect(self._open_add_fixture_dialog) 
         
@@ -248,7 +236,6 @@ class DMXControlWidget(QWidget,
         scene_group = QGroupBox("Gestione Scene")
         scene_layout = QVBoxLayout(scene_group)
         
-        # Cattura Scena
         capture_layout = QHBoxLayout()
         self.scene_name_input = QLineEdit()
         self.scene_name_input.setPlaceholderText("Nome Scena")
@@ -259,7 +246,6 @@ class DMXControlWidget(QWidget,
         scene_layout.addWidget(QLabel("Cattura Scena Corrente:"))
         scene_layout.addLayout(capture_layout)
         
-        # Lista Scene
         scene_layout.addWidget(QLabel("\nScene Salvate (Doppio Click per Applicare):"))
         self.scene_list_widget = QListWidget() 
         self.scene_list_widget.setMaximumHeight(100)
@@ -279,7 +265,6 @@ class DMXControlWidget(QWidget,
         chaser_group = QGroupBox("Gestione Sequenze (Chaser)")
         chaser_layout = QVBoxLayout(chaser_group)
         
-        # Editor Chaser
         editor_layout = QHBoxLayout()
         self.btn_open_chaser_editor = QPushButton("Crea / Modifica Sequenza") 
         self.btn_open_chaser_editor.clicked.connect(self._open_chaser_editor_dialog)
@@ -289,14 +274,12 @@ class DMXControlWidget(QWidget,
         editor_layout.addWidget(self.btn_delete_chaser)
         chaser_layout.addLayout(editor_layout)
         
-        # Lista Chaser
         chaser_layout.addWidget(QLabel("\nSequenze Salvate (Seleziona per Avviare):"))
         self.chaser_list_widget = QListWidget() 
         self.chaser_list_widget.setMaximumHeight(100)
         self.chaser_list_widget.doubleClicked.connect(self._open_chaser_editor_dialog) 
         chaser_layout.addWidget(self.chaser_list_widget)
         
-        # Controlli Chaser
         chaser_ctrl_layout = QHBoxLayout()
         self.btn_start_chaser = QPushButton("Avvia Sequenza Selezionata") 
         self.btn_start_chaser.clicked.connect(self._avvia_chaser) 
@@ -308,6 +291,31 @@ class DMXControlWidget(QWidget,
         
         layout.addWidget(chaser_group) 
         
-        # Spaziatore per spingere gli elementi in alto
         layout.addItem(QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)) 
         return group_box
+
+    # Metodi esposti a main.py dalla barra dei menu (delegati al Mixin):
+    def salva_progetto_a_file(self):
+        self._salva_stato_progetto() # Chiamato dal Mixin
+        super().salva_progetto_a_file()
+        
+    def carica_progetto_da_file(self):
+        super().carica_progetto_da_file()
+
+    def _open_settings_dialog(self):
+        super()._open_settings_dialog()
+
+    def _show_info_dialog(self):
+        super()._show_info_dialog()
+        
+    def _open_stage_view(self):
+        super()._open_stage_view()
+        
+    def _open_fixture_editor(self):
+        super()._open_fixture_editor()
+
+    def _open_midi_mapping_dialog(self):
+        super()._open_midi_mapping_dialog()
+    
+    def _handle_dmx_connection(self):
+         super()._handle_dmx_connection()

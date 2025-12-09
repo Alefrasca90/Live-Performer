@@ -1,6 +1,6 @@
 # ui/mixins/project_and_view_mixin.py (COMPLETO E AGGIORNATO)
 
-from PyQt6.QtWidgets import QMessageBox, QInputDialog 
+from PyQt6.QtWidgets import QMessageBox, QInputDialog, QFileDialog
 from PyQt6.QtCore import Qt
 
 # Import dei componenti Core del Progetto e Gestione Dati
@@ -8,6 +8,7 @@ from core.dmx_models import FixtureModello, CanaleDMX, IstanzaFixture
 from core.dmx_universe import UniversoDMX
 from core.data_manager import DataManager
 from core.project_models import Progetto, UniversoStato, IstanzaFixtureStato 
+from ui.components.settings_dialog import SettingsDialog # Import per Settings
 
 
 class ProjectAndViewMixin:
@@ -72,7 +73,7 @@ class ProjectAndViewMixin:
          nuovo_universo.nome = nome
          self.universi[id] = nuovo_universo
          
-         nuovo_stato = UniversoStato(id_universo=id, nome=nome, istanze_stato=[], scene=[], chasers=[], midi_mappings=[])
+         nuovo_stato = UniversoStato(id_universo=id, nome=nome, istanze_stato=[], scene=[], chasers=[], midi_mappings=[], dmx_port_name=self.dmx_comm.port_name)
          self.progetto.universi_stato.append(nuovo_stato)
          
          return nuovo_universo
@@ -109,29 +110,27 @@ class ProjectAndViewMixin:
             
             istanze_stato_correnti = []
             
-            # Mappa degli stati esistenti per recuperare il nome utente se non è in Stage View
             stato_esistente_map = {i.indirizzo_inizio: i for i in u_stato.istanze_stato}
             
+            # --- Aggiorna la porta DMX salvata con l'ultima usata in DMXController ---
+            if hasattr(self, 'dmx_comm'):
+                 u_stato.dmx_port_name = self.dmx_comm.port_name 
+
             for istanza in universo.fixture_assegnate:
-                # Cerca lo stato esistente, sia per posizione che per nome utente
                 stato_esistente = stato_esistente_map.get(istanza.indirizzo_inizio)
                 
                 pos_x, pos_y = 0, 0
                 nome_utente = ""
                 
                 if self.stage_view:
-                    # Recupera posizione E NOME UTENTE da Stage View (DraggableLightWidget.fixture_stato)
                     widget = self.stage_view.light_widgets.get(istanza.indirizzo_inizio) 
                     if widget:
                         pos_x, pos_y = widget.x(), widget.y()
-                        # Si assume che il widget abbia sempre l'ultimo stato salvato/trascinato
                         nome_utente = widget.fixture_stato.nome_utente
                 elif stato_esistente:
-                    # Recupera posizione E NOME UTENTE dallo stato precedente se Stage View è chiusa
                     pos_x, pos_y = stato_esistente.x, stato_esistente.y
                     nome_utente = stato_esistente.nome_utente
                 
-                # Qui si salvano solo le istanze presenti nell'universo DMX corrente.
                 istanze_stato_correnti.append(IstanzaFixtureStato(
                     modello_nome=istanza.modello.nome, 
                     indirizzo_inizio=istanza.indirizzo_inizio, 
@@ -143,15 +142,13 @@ class ProjectAndViewMixin:
             u_stato.istanze_stato = istanze_stato_correnti
             
             if id_universo == self.universo_attivo.id_universo:
-                # Assicurati che self.scene_list e self.chaser_list esistano e siano aggiornati
                 if hasattr(self, 'scene_list'):
                     u_stato.scene = self.scene_list 
                 if hasattr(self, 'chaser_list'): 
                     u_stato.chasers = self.chaser_list 
             
         DataManager.salva_progetto(self.progetto)
-        # QMessageBox.information(self, "Salvataggio", "Progetto salvato con successo.") <-- Rimosso
-
+        
     def _update_fixture_position(self, stato: IstanzaFixtureStato):
         """Metodo chiamato dalla StageView per aggiornare la posizione e il nome di una fixture."""
         for u_stato in self.progetto.universi_stato:
@@ -163,19 +160,15 @@ class ProjectAndViewMixin:
                         i_stato.nome_utente = stato.nome_utente
                         return
                         
-    # --- Modello Utility & UI Update ---
-    
+    # --- Modello Utility & UI Update (rimanenti come nell'originale) ---
     def _get_model_names(self):
         """Restituisce una stringa formattata con i nomi dei modelli fixture caricati."""
         if self.fixture_modelli:
             return "\n".join([f"- {m.nome} ({m.numero_canali}ch)" for m in self.fixture_modelli])
         return "(Nessun modello caricato)"
 
-    # Rimossa _popola_combo_modelli, la logica è nel Dialog
-
     def _update_assigned_list_ui(self):
         """Aggiorna la QListWidget con le fixture assegnate."""
-        # 'self.assigned_list_widget' and 'self.btn_remove_instance' must exist
         if not hasattr(self, 'assigned_list_widget'):
             return
             
@@ -199,7 +192,6 @@ class ProjectAndViewMixin:
         for f in self.universo_attivo.fixture_assegnate:
             start, end = f.get_indirizzi_universali()
             
-            # Usa il nome utente se disponibile
             stato = stato_map.get(f.indirizzo_inizio)
             display_name = stato.nome_utente if stato and stato.nome_utente else f.modello.nome
             
@@ -210,27 +202,24 @@ class ProjectAndViewMixin:
 
     def _open_stage_view(self):
         """Abre o porta in primo piano la finestra Stage View."""
-        # Importiamo StageViewDialog qui per evitare potenziali dipendenze circolari all'avvio
         from ui.views.stage_view import StageViewDialog 
         
         u_stato = next((u for u in self.progetto.universi_stato if u.id_universo == self.universo_attivo.id_universo), None)
         
         if not self.stage_view:
-            # StageViewDialog ha bisogno di parent per _update_fixture_position
             self.stage_view = StageViewDialog(
                 parent=self, 
                 istanze_stato=u_stato.istanze_stato if u_stato else []
             )
             self.stage_view.show()
-            self.stage_view.activateWindow() # <--- DO FOCUS ALL'APERTURA
+            self.stage_view.activateWindow() 
         else:
             self.stage_view.clear_and_repopulate(u_stato.istanze_stato if u_stato else [])
             self.stage_view.show()
-            self.stage_view.activateWindow() # <--- DO FOCUS AL RIAPRIRE
+            self.stage_view.activateWindow() 
 
     def _open_fixture_editor(self):
         """Permette di selezionare un modello esistente da modificare o di crearne uno nuovo."""
-        # Importiamo FixtureEditorDialog qui
         from ui.components.fixture_editor import FixtureEditorDialog 
         
         modelli_editabili = [m for m in self.fixture_modelli if "Virtuale" not in m.nome]
@@ -275,5 +264,73 @@ class ProjectAndViewMixin:
             
         DataManager.salva_modelli(self.fixture_modelli)
         
-        # Non serve più popolare la combo modelli.
         QMessageBox.information(self, "Successo", f"Modello '{nuovo_modello.nome}' salvato e disponibile.")
+
+    # --- Metodi Aggiunti per il Menu Bar ---
+
+    def salva_progetto_a_file(self):
+        """Salva lo stato corrente del progetto DMX in un file JSON a scelta (chiamato da Menu File)."""
+        self._salva_stato_progetto() # Assicura che l'oggetto self.progetto sia aggiornato
+        
+        default_path = str(DataManager.PROJECT_FILE) if DataManager.PROJECT_FILE.exists() else "progetto_dmx.json"
+        filename, _ = QFileDialog.getSaveFileName(self, 
+                                                  "Salva Progetto DMX", 
+                                                  default_path,
+                                                  "DMX Project Files (*.json)")
+        
+        if filename:
+            try:
+                # Salva il progetto aggiornato sul percorso scelto
+                DataManager._save_project_to_path(self.progetto, filename) 
+                QMessageBox.information(self, "Salvataggio", f"Progetto DMX salvato in: {filename}")
+            except Exception as e:
+                QMessageBox.critical(self, "Errore di Salvataggio", f"Impossibile salvare il progetto: {e}")
+
+    def carica_progetto_da_file(self):
+        """Carica un nuovo stato di progetto DMX da un file JSON (chiamato da Menu File)."""
+        filename, _ = QFileDialog.getOpenFileName(self, 
+                                                  "Carica Progetto DMX", 
+                                                  str(DataManager.PROJECT_FILE.parent) if DataManager.PROJECT_FILE.exists() else ".",
+                                                  "DMX Project Files (*.json)")
+        
+        if filename:
+            try:
+                nuovo_progetto = DataManager._load_project_from_path(filename)
+                
+                self.progetto = nuovo_progetto 
+                self._ricostruisci_universi() 
+                
+                if self.universo_attivo.id_universo not in self.universi:
+                    self.universo_attivo = next(iter(self.universi.values()))
+                    
+                self._ricostruisci_scene_chasers(
+                    next((u for u in self.progetto.universi_stato if u.id_universo == self.universo_attivo.id_universo), Progetto.crea_vuoto().universi_stato[0])
+                )
+                self.popola_controlli_fader()
+                self._update_assigned_list_ui()
+
+                QMessageBox.information(self, "Caricamento", f"Progetto DMX caricato da: {filename}. Riconnessione DMX/MIDI necessaria.")
+
+                # Tentativo di riavvio DMX per applicare la porta salvata
+                if hasattr(self, 'dmx_comm') and hasattr(self, '_load_midi_settings') and hasattr(self, '_update_dmx_status_ui'):
+                    dmx_port = next((u.dmx_port_name for u in self.progetto.universi_stato if u.id_universo == self.universo_attivo.id_universo), self.dmx_comm.port_name)
+                    self.dmx_comm.port_name = dmx_port
+                    self.dmx_comm.connect() # Riconnette DMX
+                    self._load_midi_settings() # Riconnette MIDI Input
+                    self._update_dmx_status_ui()
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Errore di Caricamento", f"Impossibile caricare il progetto: {e}")
+
+    def _open_settings_dialog(self):
+        """Apre la finestra di dialogo delle impostazioni audio/MIDI/Display (chiamato da Menu Settings)."""
+        if not hasattr(self, 'audio_engine') or not hasattr(self, 'midi_engine') or not hasattr(self, 'settings_manager'):
+             QMessageBox.critical(self, "Errore", "Dipendenze Engine/Settings non trovate.")
+             return
+             
+        dlg = SettingsDialog(self.audio_engine, self.midi_engine, self.settings_manager)
+        dlg.exec()
+
+    def _show_info_dialog(self):
+        """Mostra un dialogo informativo sull'applicazione (chiamato da Menu Info)."""
+        QMessageBox.about(self, "Informazioni Software", "Live Performer - Unified Lighting & Media Controller\n\nVersione: 1.0\n\nProgetto Open Source per la gestione sincronizzata di DMX, MIDI, Audio e Lyrics.\n\nSviluppato da Alessandro (alefrasca90).")

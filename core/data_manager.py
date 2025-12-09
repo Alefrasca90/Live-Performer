@@ -19,7 +19,6 @@ class DataManager:
 
     def __init__(self):
         # --- SCENOGRAFIA / MEDIA ATTRIBUTES ---
-        # Manteniamo la logica originale per i percorsi per i file media
         self.base_dir = os.path.join(os.getcwd(), "data")
         self.songs_dir = os.path.join(self.base_dir, "songs")
         self.playlists_dir = os.path.join(self.base_dir, "playlists")
@@ -84,175 +83,166 @@ class DataManager:
 
     @staticmethod
     def salva_progetto(progetto: Progetto):
-        """Salva l'intero stato del progetto."""
-        DATA_PATH.mkdir(exist_ok=True)
-        
-        data_to_save = {
-            "universi": []
-        }
-        
-        for u_stato in progetto.universi_stato:
-            # Serializzazione Istanze (Stato)
-            istanze_ser = [
-                {'modello_nome': i.modello_nome, 'addr': i.indirizzo_inizio, 'x': i.x, 'y': i.y, 'nome_utente': i.nome_utente}
-                for i in u_stato.istanze_stato
-            ]
-            
-            # Serializzazione Scene
-            scene_ser = [
-                {'nome': s.nome, 'valori_canali': s.valori_canali}
-                for s in u_stato.scene
-            ]
-
-            # Serializzazione Chaser
-            chasers_ser = [
-                {
-                    'nome': c.nome,
-                    'passi': [
-                        {
-                            'scena_nome': p.scena.nome,
-                            'tempo_permanenza': p.tempo_permanenza,
-                            'tempo_fade_in': p.tempo_fade_in,
-                            'tempo_fade_out': p.tempo_fade_out
-                        }
-                        for p in c.passi
-                    ]
-                }
-                for c in u_stato.chasers
-            ]
-            
-            # Serializzazione Mappatura MIDI
-            midi_mappings_ser = [
-                {
-                    'midi_type': m.midi_type,
-                    'midi_number': m.midi_number,
-                    'value': m.value,
-                    'action_type': m.action_type,
-                    'action_index': m.action_index
-                }
-                for m in u_stato.midi_mappings
-            ]
-
-            data_to_save["universi"].append({
-                'id': u_stato.id_universo,
-                'nome': u_stato.nome,
-                'istanze': istanze_ser,
-                'scene': scene_ser,
-                'chasers': chasers_ser,
-                'midi_mappings': midi_mappings_ser,
-                'midi_channel': u_stato.midi_channel,
-                'midi_controller_port_name': u_stato.midi_controller_port_name,
-                'dmx_port_name': u_stato.dmx_port_name
-            })
-
-        try:
-            with open(PROJECT_FILE, 'w', encoding='utf-8') as f:
-                json.dump(data_to_save, f, indent=4)
-            print(f"Progetto salvato in {PROJECT_FILE}")
-        except Exception as e:
-            print(f"Errore durante il salvataggio del progetto: {e}")
+        """Salva l'intero stato del progetto nel file di default."""
+        DataManager._save_project_to_path(progetto, str(PROJECT_FILE))
+        print(f"Progetto salvato in {PROJECT_FILE}")
 
     @staticmethod
     def carica_progetto() -> Progetto:
         """Carica lo stato del progetto. Se non esiste, crea un progetto vuoto."""
         if not PROJECT_FILE.exists():
             return Progetto.crea_vuoto()
-            
+        
         try:
-            with open(PROJECT_FILE, 'r', encoding='utf-8') as f:
-                # Gestione del file vuoto o corrotto
-                content = f.read().strip()
-                if not content:
-                     print(f"AVVISO: Il file {PROJECT_FILE.name} è vuoto o contiene solo spazi bianchi. Creazione progetto vuoto.")
-                     return Progetto.crea_vuoto()
-                data = json.loads(content)
-                
-            universi_stato = []
-            
-            for u_data in data.get("universi", []):
-                istanze_stato = [
-                    IstanzaFixtureStato(
-                        modello_nome=i['modello_nome'], 
-                        indirizzo_inizio=i['addr'], 
-                        x=i['x'], 
-                        y=i['y'],
-                        nome_utente=i.get('nome_utente', "")
-                    ) 
-                    for i in u_data.get('istanze', [])
-                ]
-                
-                scene_list = [
-                    Scena(s['nome'], {int(k): v for k, v in s['valori_canali'].items()})
-                    for s in u_data.get('scene', [])
-                ]
-
-                scene_map = {s.nome: s for s in scene_list}
-                
-                chasers_list = []
-                for c_data in u_data.get('chasers', []):
-                    passi = []
-                    for p_data in c_data.get('passi', []):
-                        scena_nome = p_data.get('scena_nome')
-                        tempo_perm = p_data.get('tempo_permanenza', 1.0)
-                        tempo_fi = p_data.get('tempo_fade_in', 0.0)
-                        tempo_fo = p_data.get('tempo_fade_out', 0.0)
-                        
-                        scena = scene_map.get(scena_nome)
-                        if scena:
-                            passi.append(PassoChaser(
-                                scena=scena, 
-                                tempo_permanenza=tempo_perm, 
-                                tempo_fade_in=tempo_fi, 
-                                tempo_fade_out=tempo_fo
-                            ))
-                            
-                    if passi: 
-                        chasers_list.append(Chaser(nome=c_data.get('nome', "Sequenza Senza Nome"), passi=passi))
-
-                midi_mappings_list = []
-                for m_data in u_data.get('midi_mappings', []):
-                    midi_mappings_list.append(MidiMapping(
-                        midi_type=m_data.get('midi_type', 'note'),
-                        midi_number=m_data.get('midi_number', 0),
-                        value=m_data.get('value', 0),
-                        action_type=m_data.get('action_type', 'stop'),
-                        action_index=m_data.get('action_index', -1)
-                    ))
-
-                midi_channel = u_data.get('midi_channel', 0) 
-                midi_controller_port_name = u_data.get('midi_controller_port_name', "") 
-                dmx_port_name = u_data.get('dmx_port_name', "COM5")
-
-                universi_stato.append(UniversoStato(
-                    id_universo=u_data.get('id', 1),
-                    nome=u_data.get('nome', "Universo Senza Nome"),
-                    istanze_stato=istanze_stato,
-                    scene=scene_list,
-                    chasers=chasers_list,
-                    midi_mappings=midi_mappings_list,
-                    midi_channel=midi_channel,
-                    midi_controller_port_name=midi_controller_port_name,
-                    dmx_port_name=dmx_port_name
-                ))
-                
-            if not universi_stato:
-                 return Progetto.crea_vuoto()
-                 
-            return Progetto(universi_stato=universi_stato)
-            
+            return DataManager._load_project_from_path(str(PROJECT_FILE))
         except (json.JSONDecodeError, KeyError, Exception) as e:
             print(f"Errore durante il caricamento del progetto. Creazione progetto vuoto. Errore: {e}")
             return Progetto.crea_vuoto()
 
-    # =============================================================
-    # --- SCENOGRAFIA / MEDIA MANAGEMENT (INSTANCE) ---
-    # =============================================================
+    # --- METODI PER SALVATAGGIO/CARICAMENTO ARBITRARIO (USATI DAL MENU FILE) ---
 
-    # --- GESTIONE CANZONI (.SCN) ---
+    @staticmethod
+    def _save_project_to_path(progetto: Progetto, path: str):
+        """Salva l'intero stato del progetto su un percorso file arbitrario."""
+        data_to_save = {
+            "universi": [
+                {
+                    'id': u_stato.id_universo,
+                    'nome': u_stato.nome,
+                    'istanze': [
+                        {'modello_nome': i.modello_nome, 'addr': i.indirizzo_inizio, 'x': i.x, 'y': i.y, 'nome_utente': i.nome_utente}
+                        for i in u_stato.istanze_stato
+                    ],
+                    'scene': [
+                        {'nome': s.nome, 'valori_canali': s.valori_canali}
+                        for s in u_stato.scene
+                    ],
+                    'chasers': [
+                        {
+                            'nome': c.nome,
+                            'passi': [
+                                {
+                                    'scena_nome': p.scena.nome,
+                                    'tempo_permanenza': p.tempo_permanenza,
+                                    'tempo_fade_in': p.tempo_fade_in,
+                                    'tempo_fade_out': p.tempo_fade_out
+                                }
+                                for p in c.passi
+                            ]
+                        }
+                        for c in u_stato.chasers
+                    ],
+                    'midi_mappings': [
+                        {
+                            'midi_type': m.midi_type,
+                            'midi_number': m.midi_number,
+                            'value': m.value,
+                            'action_type': m.action_type,
+                            'action_index': m.action_index
+                        }
+                        for m in u_stato.midi_mappings
+                    ],
+                    'midi_channel': u_stato.midi_channel,
+                    'midi_controller_port_name': u_stato.midi_controller_port_name,
+                    'dmx_port_name': u_stato.dmx_port_name
+                }
+                for u_stato in progetto.universi_stato
+            ]
+        }
+        
+        # Gestione del file di output (creazione della directory se necessario)
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(data_to_save, f, indent=4)
+        except Exception as e:
+            raise Exception(f"Errore durante il salvataggio del progetto DMX: {e}")
+
+    @staticmethod
+    def _load_project_from_path(path: str) -> Progetto:
+        """Carica un nuovo stato di progetto DMX da un percorso file arbitrario."""
+        with open(path, 'r', encoding='utf-8') as f:
+            content = f.read().strip()
+            if not content:
+                 raise ValueError("Il file di progetto è vuoto.")
+            data = json.loads(content)
+                
+        universi_stato = []
+        
+        for u_data in data.get("universi", []):
+            # Ricostruzione istanze
+            istanze_stato = [
+                IstanzaFixtureStato(
+                    modello_nome=i['modello_nome'], 
+                    indirizzo_inizio=i['addr'], 
+                    x=i['x'], 
+                    y=i['y'],
+                    nome_utente=i.get('nome_utente', "")
+                ) 
+                for i in u_data.get('istanze', [])
+            ]
+            
+            # Ricostruzione scene
+            scene_list = [
+                Scena(s['nome'], {int(k): v for k, v in s['valori_canali'].items()})
+                for s in u_data.get('scene', [])
+            ]
+            scene_map = {s.nome: s for s in scene_list}
+            
+            # Ricostruzione chasers
+            chasers_list = []
+            for c_data in u_data.get('chasers', []):
+                passi = []
+                for p_data in c_data.get('passi', []):
+                    scena_nome = p_data.get('scena_nome')
+                    scena = scene_map.get(scena_nome)
+                    if scena:
+                        passi.append(PassoChaser(
+                            scena=scena, 
+                            tempo_permanenza=p_data.get('tempo_permanenza', 1.0), 
+                            tempo_fade_in=p_data.get('tempo_fade_in', 0.0), 
+                            tempo_fade_out=p_data.get('tempo_fade_out', 0.0)
+                        ))
+                if passi: 
+                    chasers_list.append(Chaser(nome=c_data.get('nome', "Sequenza Senza Nome"), passi=passi))
+
+            # Ricostruzione midi mappings
+            midi_mappings_list = [
+                MidiMapping(
+                    midi_type=m_data.get('midi_type', 'note'),
+                    midi_number=m_data.get('midi_number', 0),
+                    value=m_data.get('value', 0),
+                    action_type=m_data.get('action_type', 'stop'),
+                    action_index=m_data.get('action_index', -1)
+                )
+                for m_data in u_data.get('midi_mappings', [])
+            ]
+
+            universi_stato.append(UniversoStato(
+                id_universo=u_data.get('id', 1),
+                nome=u_data.get('nome', "Universo Senza Nome"),
+                istanze_stato=istanze_stato,
+                scene=scene_list,
+                chasers=chasers_list,
+                midi_mappings=midi_mappings_list,
+                midi_channel=u_data.get('midi_channel', 0),
+                midi_controller_port_name=u_data.get('midi_controller_port_name', ""),
+                dmx_port_name=u_data.get('dmx_port_name', "COM5")
+            ))
+            
+        if not universi_stato:
+             return Progetto.crea_vuoto()
+             
+        return Progetto(universi_stato=universi_stato)
+
+    # --- GESTIONE CANZONI / PLAYLISTS (Metodi di istanza) ---
+    
+    # [Tutti i metodi di istanza per Songs, Tracks, Lyrics, Playlists qui sotto]
+    # L'unione completa dei metodi media si trova nel file core/data_manager.py
     
     def get_songs(self):
         """Restituisce la lista dei nomi delle canzoni salvate."""
-        # Usa os.path.join per creare un percorso assoluto
         if not os.path.exists(self.songs_dir):
             os.makedirs(self.songs_dir, exist_ok=True)
         return [
@@ -294,7 +284,6 @@ class DataManager:
     def save_song(self, name, data=None):
         """Salva lo stato corrente della canzone sul file .scn."""
         if data is None:
-            # Recupera i dati correnti dalla cache
             data = {
                 "name": name,
                 "audio_tracks": self.audio_tracks.get(name, []),
@@ -304,7 +293,6 @@ class DataManager:
             }
         path = os.path.join(self.songs_dir, f"{name}{self.song_extension}")
         
-        # Aggiorna la cache con i dati che vengono salvati
         if "audio_tracks" in data:
             self.audio_tracks[name] = data["audio_tracks"]
         if "midi_tracks" in data:
@@ -327,8 +315,6 @@ class DataManager:
         self.midi_tracks.pop(name, None)
         self.lyrics.pop(name, None)
 
-    # --- GESTIONE TRACCE AUDIO ---
-    
     def add_audio_track(self, song_name, file_path, output_index=0, channels=2, channels_used=2, output_start_channel=1, bpm=None):
         """Aggiunge una traccia audio con i dettagli dei canali usati e il BPM."""
         self.audio_tracks.setdefault(song_name, []).append({
@@ -358,8 +344,6 @@ class DataManager:
                  track["bpm"] = bpm 
             self.save_song(song_name)
 
-    # --- GESTIONE TRACCE MIDI ---
-    
     def add_midi_track(self, song_name, channel, port=None, file_path=None):
         """Aggiunge una traccia MIDI con percorso del file."""
         self.midi_tracks.setdefault(song_name, []).append({"file": file_path, "channel": channel, "port": port})
@@ -378,8 +362,6 @@ class DataManager:
             self.midi_tracks[song_name][index]["channel"] = channel
             self.save_song(song_name)
 
-    # --- GESTIONE LYRICS ---
-    
     def save_lyrics(self, song_name: str, lyrics_list: list[dict]):
         """Salva le lyrics aggiornate (formato con timestamp) sul file .scn."""
         song_data = self.load_song(song_name)
@@ -416,17 +398,13 @@ class DataManager:
         lyrics = song_data.get("lyrics", [])
         txt = song_data.get("lyrics_txt", None)
 
-        # Conversione da eventuale formato vecchio
         if lyrics and isinstance(lyrics[0], str):
             lyrics = [{"line": l, "time": 0.0} for l in lyrics]
 
         return lyrics, txt
 
-    # --- GESTIONE PLAYLISTS ---
-
     def get_playlists(self):
         """Restituisce la lista dei nomi delle playlist."""
-        # Usa os.path.join per creare un percorso assoluto
         if not os.path.exists(self.playlists_dir):
             os.makedirs(self.playlists_dir, exist_ok=True)
         return [
@@ -463,8 +441,6 @@ class DataManager:
         path = os.path.join(self.playlists_dir, f"{name}.json")
         if os.path.exists(path):
             os.remove(path)
-
-    # --- METODI PER EDITING PLAYLIST ---
 
     def add_song_to_playlist(self, playlist_name, song_name):
         """Aggiunge un brano alla lista di canzoni della playlist."""
