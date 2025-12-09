@@ -79,8 +79,6 @@ class PlaylistEditorWidget(QWidget):
         self.init_ui()
         self.load_playlist_songs()
         
-        # Rimosso open_lyrics_prompter_on_init 
-        
         self.playback_timer = QTimer(self)
         self.playback_timer.timeout.connect(self.update_playback_state)
         self.playback_timer.start(self.PLAYLIST_SYNC_INTERVAL_MS)
@@ -94,7 +92,7 @@ class PlaylistEditorWidget(QWidget):
               self.playlist_list.setCurrentRow(0)
               self.current_song_index = 0
              
-         self.open_lyrics_prompter(force_show=True, force_song_name=song_name_to_prompt)
+         self.open_lyrics_prompter(force_song_name=song_name_to_prompt)
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -116,7 +114,7 @@ class PlaylistEditorWidget(QWidget):
         self.progress_slider = QSlider(Qt.Orientation.Horizontal)
         self.progress_slider.setRange(0, 1000)
         self.progress_slider.sliderMoved.connect(self.on_slider_moved)
-        self.progress_slider.sliderPressed.connect(self.on_slider_press)
+        self.progress_slider.sliderPressed.connect(lambda: setattr(self, 'is_slider_pressed', True))
         self.progress_slider.sliderReleased.connect(self.on_slider_release)
         self.progress_slider.setEnabled(False) 
         layout.addWidget(self.progress_slider)
@@ -419,8 +417,8 @@ class PlaylistEditorWidget(QWidget):
                 if not self.is_slider_pressed:
                      self.progress_slider.setValue(progress)
 
-            time_str = self.format_time(current_time)
-            duration_str = self.format_time(duration)
+            time_str = self._format_time(current_time)
+            duration_str = self._format_time(duration)
             self.time_label.setText(f"{time_str} / {duration_str}")
 
             # Gestione Fine Brano e Transizione Playlist (FIX Autoplay)
@@ -437,7 +435,7 @@ class PlaylistEditorWidget(QWidget):
              self.update_playback_buttons()
 
 
-    def format_time(self, seconds):
+    def _format_time(self, seconds):
         """Formatta i secondi in stringa MM:SS."""
         if seconds is None or seconds < 0: return "00:00"
         m, s = divmod(int(seconds), 60)
@@ -503,8 +501,8 @@ class PlaylistEditorWidget(QWidget):
         duration = self.audio_engine.get_duration()
         if duration > 0:
             target_time = (value / 1000) * duration
-            time_str = self.format_time(target_time)
-            duration_str = self.format_time(duration)
+            time_str = self._format_time(target_time)
+            duration_str = self._format_time(duration)
             self.time_label.setText(f"{time_str} / {duration_str}")
 
     def on_song_clicked(self, item):
@@ -512,5 +510,4 @@ class PlaylistEditorWidget(QWidget):
          
     def closeEvent(self, event):
          self.stop_playback()
-         # Non chiudiamo più il player qui, è gestito dal MainWindow/Tab
          event.accept()

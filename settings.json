@@ -1,0 +1,14 @@
+{
+  "audio_driver": null,
+  "midi_port": null,
+  "main_window_screen": null,
+  "video_playback_screen": null,
+  "lyrics_prompter_screen": "\\\\.\\DISPLAY1",
+  "lyrics_bg_color": "#000000",
+  "lyrics_font_color": "#FFFFFF",
+  "lyrics_highlight_color": "#00FF00",
+  "lyrics_read_ahead_time": 1.0,
+  "lyrics_scrolling_mode": true,
+  "midi_clock_enabled": false,
+  "midi_clock_port": null
+}

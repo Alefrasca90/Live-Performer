@@ -1,23 +1,24 @@
 import sys
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QApplication, QPushButton, QSizePolicy
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QApplication, QPushButton, QSizePolicy, QSlider, QComboBox, QDialog
 from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QPoint, QEasingCurve 
 from PyQt6.QtGui import QFont, QScreen, QRegion, QFontMetrics
 from math import floor
 import time
 
-class LyricsPlayerWidget(QWidget): # Rinominated and inheritance changed
+class LyricsPlayerWidget(QWidget): 
     """
     Widget che visualizza i lyrics sincronizzati (incorporabile in un tab).
+    Include la barra di trasporto e i controlli per la proiezione esterna.
     """
     # Nuove costanti per il ridimensionamento automatico
-    TARGET_CHARS = 60 # Numero di caratteri orizzontali di riferimento
-    FIXED_SPACING = 0 # Spaziatura verticale fissa tra le linee (in pixel)
-    MIN_VISIBLE_LINES = 3 # Numero minimo di linee visualizzabili
-    BASE_HEIGHT_FACTOR = 2.0 # FATTORE CHIAVE: 2.0 per garantire che la linea centrale sia sempre visibile
+    TARGET_CHARS = 60
+    FIXED_SPACING = 0
+    MIN_VISIBLE_LINES = 3
+    BASE_HEIGHT_FACTOR = 2.0
     
     def __init__(self, audio_engine, midi_engine, settings_manager, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Lyrics Prompter") # Keep title for consistency
+        self.setWindowTitle("Lyrics Prompter") 
         
         self.resize(200, 200) 
         self.setMinimumSize(200, 200) 
@@ -28,14 +29,13 @@ class LyricsPlayerWidget(QWidget): # Rinominated and inheritance changed
         self.lyrics_data = [] 
         
         self.active_line_index = -1
-        self.is_fullscreen = False # Still managed, but toggle is done via main app
+        self.is_fullscreen = False 
+        self.is_slider_pressed = False
         
-        # Carica le impostazioni dinamiche
         settings_data = self.settings.data
         self.read_ahead_time = settings_data.get("lyrics_read_ahead_time", 1.0)
         self.scrolling_mode = settings_data.get("lyrics_scrolling_mode", True)
         
-        # Inizializzazione per il calcolo dinamico
         self.visible_lines = self.MIN_VISIBLE_LINES 
         self.center_line_index = (self.visible_lines - 1) // 2
         self.font_base_size = 48 
@@ -50,13 +50,362 @@ class LyricsPlayerWidget(QWidget): # Rinominated and inheritance changed
         self.pixel_per_line: float = 0.0
         self.target_offset_y: int = 0
         self.animation: QPropertyAnimation | None = None
-
+        
+        # Controlli esterni per la proiezione
+        self.external_window: QDialog | None = None 
+        self.external_content_widget: QWidget | None = None
+        self.available_screens = QApplication.screens()
 
         self.init_ui()
         self.setup_timer()
         
-        # --- Rimosso setWindowFlags e setModal: ora è un QWidget incorporato ---
+        self._update_screen_combo()
+        self.update_playback_buttons()
+        
+    def _format_time(self, seconds):
+        """Formatta i secondi in stringa MM:SS."""
+        if seconds is None or seconds < 0: return "00:00"
+        m, s = divmod(int(seconds), 60)
+        return f"{m:02d}:{s:02d}"
 
+    # --- UI SETUP ---
+
+    def init_ui(self):
+        main_layout = QVBoxLayout(self)
+        
+        # 1. Title Label
+        self.title_label = QLabel("Nessun Brano in Riproduzione")
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #00FF00;")
+        main_layout.addWidget(self.title_label)
+        main_layout.addSpacing(10)
+
+        # 2. Controls Toolbar (Horizontal, inherits app theme)
+        self._setup_controls(main_layout)
+        
+        # 3. Lyrics Display Container (Receives dynamic color)
+        self.display_container = QWidget()
+        display_layout = QVBoxLayout(self.display_container)
+        display_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(self.display_container, 1) 
+        
+        # 4. Lyrics Area (Viewport + Wrapper inside display_container)
+        self._setup_lyrics_display_area(display_layout)
+        # Re-assign self.lyrics_viewport to the viewport widget itself
+        # (Needed to correctly calculate dimensions in resizeEvent)
+        self.lyrics_viewport = self.display_container.findChild(QWidget, "LyricsViewport")
+        
+    def _setup_controls(self, main_layout):
+        """Setup della barra di trasporto e dei controlli display (pulsanti, slider, schermo)."""
+        
+        # Main horizontal layout for transport/screen selection
+        toolbar_layout = QHBoxLayout()
+        toolbar_layout.setContentsMargins(5, 0, 5, 5)
+
+        # 1. Buttons (Left)
+        self.btn_play = QPushButton("▶️ Play")
+        self.btn_stop = QPushButton("⏹️ Stop")
+        self.btn_play.clicked.connect(self._toggle_play_pause)
+        self.btn_stop.clicked.connect(self._stop_playback)
+        
+        button_group = QHBoxLayout()
+        button_group.addWidget(self.btn_play)
+        button_group.addWidget(self.btn_stop)
+        
+        toolbar_layout.addLayout(button_group) 
+        
+        # 2. Time Label (Fixed width)
+        self.time_label = QLabel("00:00 / 00:00")
+        self.time_label.setFixedWidth(80) 
+        self.time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        toolbar_layout.addWidget(self.time_label)
+
+        # 3. Slider (Half Screen Width - Stretch Factor 2)
+        self.progress_slider = QSlider(Qt.Orientation.Horizontal)
+        self.progress_slider.setRange(0, 1000)
+        self.progress_slider.sliderMoved.connect(self._on_slider_moved)
+        self.progress_slider.sliderPressed.connect(lambda: setattr(self, 'is_slider_pressed', True))
+        self.progress_slider.sliderReleased.connect(self._on_slider_release)
+        self.progress_slider.setEnabled(False) 
+        
+        toolbar_layout.addWidget(self.progress_slider, 2) # Stretch factor 2 (approx half width)
+        
+        # 4. Screen Selection (Right - Stretch Factor 1)
+        screen_label = QLabel("Proietta su:")
+        screen_label.setFixedWidth(70) 
+        toolbar_layout.addWidget(screen_label)
+        
+        self.combo_screen = QComboBox()
+        self.combo_screen.currentIndexChanged.connect(self._handle_screen_change)
+        toolbar_layout.addWidget(self.combo_screen, 1) # Stretch factor 1
+        
+        main_layout.addLayout(toolbar_layout)
+
+    def _setup_lyrics_display_area(self, display_layout: QVBoxLayout):
+        """Setup dell'area di visualizzazione dei lyrics (Viewport + Wrapper) all'interno di un layout fornito."""
+        
+        # 1. Viewport (Area visibile che esegue il clipping del contenuto)
+        lyrics_viewport = QWidget() 
+        lyrics_viewport.setObjectName("LyricsViewport")
+        lyrics_viewport.setContentsMargins(0, 0, 0, 0)
+        
+        display_layout.addWidget(lyrics_viewport, 1) 
+        
+        # 2. Wrapper (Il contenuto che scorre) - Parented al viewport
+        self.lyrics_wrapper = QWidget(lyrics_viewport) 
+        self.lyrics_wrapper.setObjectName("LyricsWrapper")
+
+        # 3. Layout dentro il wrapper
+        self.lyrics_layout = QVBoxLayout(self.lyrics_wrapper) 
+        self.lyrics_layout.setContentsMargins(0, 0, 0, 0)
+
+        for i in range(self.MIN_VISIBLE_LINES): 
+            label = QLabel()
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            label.setWordWrap(True)
+            self.lyrics_layout.addWidget(label)
+            self.lyric_labels.append(label)
+            
+        if self.lyric_labels:
+             self.current_line_label = self.lyric_labels[(self.MIN_VISIBLE_LINES - 1) // 2]
+             self.current_line_label.setText("Premi Play sulla tab Media per avviare la riproduzione.")
+
+        # Configura l'animazione
+        self.animation = QPropertyAnimation(self.lyrics_wrapper, b'pos')
+        self.animation.setDuration(400) 
+        self.animation.setEasingCurve(QEasingCurve.Type.InOutQuad) 
+
+    # --- EXTERNAL PROJECTION LOGIC ---
+
+    def _update_screen_combo(self):
+        """Popola la QComboBox con gli schermi disponibili."""
+        self.combo_screen.clear()
+        self.available_screens = QApplication.screens()
+        
+        # Option 0: No projection
+        self.combo_screen.addItem("Non proiettare (Solo Tab)")
+        
+        for i, screen in enumerate(self.available_screens):
+            name = f"Schermo {i+1} ({screen.availableGeometry().width()}x{screen.availableGeometry().height()})"
+            # Store the screen name as item data
+            self.combo_screen.addItem(name, screen.name()) 
+
+        # Tentativo di caricare l'ultima impostazione salvata
+        saved_screen_name = self.settings.data.get("lyrics_prompter_screen", None)
+        if saved_screen_name:
+            idx = self.combo_screen.findData(saved_screen_name)
+            if idx > 0: 
+                 self.combo_screen.setCurrentIndex(idx)
+
+
+    def _handle_screen_change(self, index):
+        """Gestisce il cambio di selezione nello schermo e attiva/disattiva la proiezione."""
+        screen_name = self.combo_screen.itemData(index)
+        
+        # 1. Salva l'impostazione
+        if index == 0:
+            self.settings.set_lyrics_prompter_screen(None)
+        else:
+            self.settings.set_lyrics_prompter_screen(screen_name)
+
+        # 2. Attiva/disattiva la proiezione
+        self._toggle_external_window(screen_name)
+
+    def _toggle_external_window(self, target_screen_name: str | None):
+        """Crea, sposta o chiude la finestra di proiezione esterna."""
+        
+        # Chiudi la finestra se il target è None (Non proiettare)
+        if not target_screen_name:
+            if self.external_window:
+                self.external_window.close()
+                self.external_window = None
+            return
+
+        # Trova lo schermo di destinazione
+        target_screen = next((s for s in self.available_screens if s.name() == target_screen_name), None)
+        if not target_screen: return
+
+        # Crea/Aggiorna la finestra esterna
+        if not self.external_window:
+            self.external_window = QDialog()
+            self.external_window.setWindowTitle(self.windowTitle() + " (Proiezione)")
+            self.external_window.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
+            
+            # Utilizza una replica semplice del layout interno
+            external_layout = QVBoxLayout(self.external_window)
+            external_layout.setContentsMargins(0, 0, 0, 0)
+            
+            # Il contenuto effettivo (label, wrapper) viene replicato tramite lo styling dinamico
+            # L'area lyrics_viewport gestisce il disegno. Per la finestra esterna, replichiamo lo styling.
+            
+        # Sposta e imposta la modalità fullscreen
+        screen_geometry = target_screen.geometry()
+        self.external_window.move(screen_geometry.topLeft())
+        self.external_window.resize(screen_geometry.size())
+        self.external_window.showFullScreen()
+        
+        # Applica lo styling dinamico per il background (il font sarà gestito da reapply_side_font)
+        bg_color = self.settings.data.get("lyrics_bg_color", "#000000")
+        self.external_window.setStyleSheet(f"background-color: {bg_color};")
+
+
+    # --- PLAYBACK & UI UPDATE LOGIC ---
+    
+    def _toggle_play_pause(self):
+        """Gestisce lo stato Play/Pausa/Riprendi sull'AudioEngine condiviso."""
+        current_song_name = self.audio_engine.playing_song
+        is_playing = current_song_name and not self.audio_engine.is_stopped()
+        is_currently_paused = self.audio_engine.pause_time > 0.0 and self.audio_engine.is_stopped()
+
+        if is_playing:
+            self.audio_engine.pause_playback(current_song_name)
+            self.midi_engine.pause_playback(current_song_name)
+        elif is_currently_paused:
+            self.audio_engine.start_playback(current_song_name) 
+            self.midi_engine.start_playback(current_song_name)
+        
+        self.update_playback_buttons()
+        
+    def _stop_playback(self):
+        """Ferma la riproduzione sull'AudioEngine condiviso."""
+        current_song_name = self.audio_engine.playing_song
+        if current_song_name:
+            self.audio_engine.stop_playback(current_song_name)
+            self.midi_engine.stop_playback(current_song_name)
+        
+        self.update_playback_buttons()
+
+    def _on_slider_release(self):
+        """Esegue il seek al rilascio del cursore."""
+        self.is_slider_pressed = False
+        current_song_name = self.audio_engine.playing_song
+        if not current_song_name: return
+
+        duration = self.audio_engine.get_duration()
+        if duration > 0:
+            progress = self.progress_slider.value()
+            target_time_s = (progress / 1000) * duration
+            
+            # Riavvia la riproduzione dal tempo di destinazione
+            self.audio_engine.stop_playback(current_song_name)
+            self.audio_engine.start_playback(current_song_name, start_time_s=target_time_s)
+            self.midi_engine.start_playback(current_song_name) # Riavvia MIDI sync
+            
+            self.update_playback_buttons()
+
+    def _on_slider_moved(self, value):
+        """Aggiorna solo l'etichetta del tempo mentre si trascina lo slider."""
+        current_song_name = self.audio_engine.playing_song
+        if not current_song_name: return
+
+        duration = self.audio_engine.get_duration()
+        if duration > 0:
+            target_time = (value / 1000) * duration
+            time_str = self._format_time(target_time)
+            duration_str = self._format_time(duration)
+            self.time_label.setText(f"{time_str} / {duration_str}")
+
+    def update_playback_buttons(self):
+        """Aggiorna lo stato di attivazione e il testo dei pulsanti di controllo."""
+        is_playing = self.audio_engine.playing_song is not None and not self.audio_engine.is_stopped()
+        is_currently_paused = self.audio_engine.pause_time > 0.0 and self.audio_engine.is_stopped()
+        has_song = self.audio_engine.playing_song is not None
+        
+        # Stato Play/Pause Toggle
+        if is_playing:
+            self.btn_play.setText("⏸️ Pausa")
+        elif is_currently_paused:
+            self.btn_play.setText("▶️ Riprendi")
+        else:
+            self.btn_play.setText("▶️ Play")
+        
+        self.btn_play.setEnabled(has_song or is_currently_paused)
+        self.btn_stop.setEnabled(is_playing or is_currently_paused)
+        self.progress_slider.setEnabled(has_song or is_currently_paused)
+
+
+    def setup_timer(self):
+        """Configura il timer per l'aggiornamento dei testi e della barra di trasporto."""
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_lyrics_display)
+        self.timer.timeout.connect(self._update_transport_state)
+        self.timer.start(50)
+
+    def _update_transport_state(self):
+        """Aggiorna lo slider e l'etichetta del tempo in base ad AudioEngine."""
+        current_song_name = self.audio_engine.playing_song
+        is_playing_or_paused = current_song_name is not None and (not self.audio_engine.is_stopped() or self.audio_engine.pause_time > 0.0)
+
+        if is_playing_or_paused:
+            current_time = self.audio_engine.get_current_time()
+            duration = self.audio_engine.get_duration()
+            
+            # Aggiorna il titolo
+            self.title_label.setText(f"Lyrics: {current_song_name}")
+
+            if duration > 0:
+                progress = int((current_time / duration) * 1000)
+                if not self.is_slider_pressed:
+                     self.progress_slider.setValue(progress)
+
+            time_str = self._format_time(current_time)
+            duration_str = self._format_time(duration)
+            self.time_label.setText(f"{time_str} / {duration_str}")
+        else:
+            self.title_label.setText("Nessun Brano in Riproduzione")
+            
+        self.update_playback_buttons()
+        
+
+    def update_lyrics_display(self):
+        """Aggiorna le lyrics in base al tempo di riproduzione (Master Clock: AudioEngine)."""
+        
+        current_time_s = self.audio_engine.get_current_time() 
+        duration = self.audio_engine.get_duration()
+        
+        if not self.lyrics_data:
+             return
+        
+        # Logica di stop fine brano
+        if current_time_s >= duration and duration > 0 and self.audio_engine.is_stopped():
+             self.active_line_index = -1
+             if self.lyrics_wrapper:
+                 self.lyrics_wrapper.move(0, self.target_offset_y)
+             if self.current_line_label:
+                 self.current_line_label.setText("Riproduzione Terminata...")
+             return
+             
+        if self.audio_engine.is_stopped() and current_time_s < 0.1:
+             self.active_line_index = -1
+             if self.lyrics_wrapper:
+                 self.lyrics_wrapper.move(0, self.target_offset_y)
+             if self.current_line_label:
+                 self.current_line_label.setText("Riproduzione Ferma...")
+             return
+             
+        sync_time_s = current_time_s + self.read_ahead_time 
+             
+        new_active_index = -1
+        for i, entry in enumerate(self.lyrics_data):
+            if entry['time'] <= sync_time_s + 0.05: 
+                new_active_index = i
+            else:
+                break
+        
+        if new_active_index != self.active_line_index:
+            self.active_line_index = new_active_index
+            
+            if self.scrolling_mode:
+                 self.update_lyric_labels_continuous() 
+                 self._start_scroll_animation(new_active_index) 
+            else:
+                 self.update_lyric_labels_fixed(new_active_index)
+
+        # Sincronizza l'aspetto della finestra esterna
+        if self.external_window and self.external_window.isVisible():
+            # Forza l'aggiornamento visivo (redraw) della finestra esterna
+            self.external_window.update() 
+    
     def update_fixed_labels_count(self, target_count):
         """Aggiunge o rimuove i QLabel per adattarsi al numero di linee visibili (solo in Fixed Mode)."""
         current_count = len(self.lyric_labels)
@@ -83,7 +432,7 @@ class LyricsPlayerWidget(QWidget): # Rinominated and inheritance changed
              self.current_line_label = QLabel(self.lyrics_wrapper)
 
     def reload_ui_for_new_data(self, lyrics_count):
-        """Prepara l'UI per il caricamento di nuovi dati (rimuove/ricrea i label se necessario)."""
+        """Prepara l'UI per il caricamento di nuovi dati."""
         
         if self.scrolling_mode:
             current_count = len(self.lyric_labels)
@@ -113,10 +462,10 @@ class LyricsPlayerWidget(QWidget): # Rinominated and inheritance changed
 
     def set_lyrics_data(self, lyrics_data: list[dict], song_name: str):
         """Aggiorna i dati dei lyrics e la UI, ricaricando i QLabel se necessario."""
-        
         self.lyrics_data = sorted(lyrics_data, key=lambda x: x['time'])
         self.active_line_index = -1
         self.setWindowTitle(f"Lyrics Prompter - {song_name}")
+        self.title_label.setText(f"Lyrics: {song_name}")
         
         self.reload_ui_for_new_data(len(self.lyrics_data)) 
         
@@ -129,63 +478,13 @@ class LyricsPlayerWidget(QWidget): # Rinominated and inheritance changed
         
         self.update_lyrics_display()
 
-    def keyPressEvent(self, event):
-        """Intercetta il tasto F11 per il toggle fullscreen e Esc per chiudere."""
-        if event.key() == Qt.Key.Key_F11:
-            self.toggle_fullscreen()
-        elif event.key() == Qt.Key.Key_Escape:
-            self.close()
-        super().keyPressEvent(event)
-
-
-    # -------------------------------------------------------------
-    # UI SETUP E SCHERMO MULTIPLO
-    # -------------------------------------------------------------
-
-    def init_ui(self):
-        main_layout = QVBoxLayout()
-        self.setLayout(main_layout)
+    def resizeEvent(self, event):
+        """Ricalcola le dimensioni del viewport e del wrapper al ridimensionamento."""
+        super().resizeEvent(event)
+        if self.lyrics_viewport:
+            self.lyrics_viewport.setMask(QRegion(self.lyrics_viewport.rect())) 
+        self.resize_and_reposition_wrapper()
         
-        # AREA DI CONTROLLO
-        controls_layout = QHBoxLayout()
-        self.btn_fullscreen = QPushButton("F11")
-        self.btn_fullscreen.setVisible(False)
-        controls_layout.addWidget(self.btn_fullscreen)
-        controls_layout.addStretch()
-        
-        main_layout.addLayout(controls_layout) 
-
-        # 1. Viewport 
-        self.lyrics_viewport = QWidget()
-        self.lyrics_viewport.setContentsMargins(0, 0, 0, 0)
-        
-        main_layout.addWidget(self.lyrics_viewport, 1) 
-        
-        # 2. Wrapper
-        self.lyrics_wrapper = QWidget(self.lyrics_viewport)
-        self.lyrics_wrapper.setObjectName("LyricsWrapper")
-
-        # 3. Layout dentro il wrapper 
-        self.lyrics_layout = QVBoxLayout(self.lyrics_wrapper)
-        self.lyrics_layout.setContentsMargins(0, 0, 0, 0)
-
-        # Creiamo un set minimo di QLabel
-        for i in range(self.MIN_VISIBLE_LINES): 
-            label = QLabel()
-            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            label.setWordWrap(True)
-            self.lyrics_layout.addWidget(label)
-            self.lyric_labels.append(label)
-            
-        if self.lyric_labels:
-             self.current_line_label = self.lyric_labels[(self.MIN_VISIBLE_LINES - 1) // 2]
-             self.current_line_label.setText("Nessun brano in riproduzione.")
-
-        # Configura l'animazione
-        self.animation = QPropertyAnimation(self.lyrics_wrapper, b'pos')
-        self.animation.setDuration(400) 
-        self.animation.setEasingCurve(QEasingCurve.Type.InOutQuad) 
-
     def apply_settings(self):
         """Applica le impostazioni di styling e schermo dal SettingsManager."""
         
@@ -198,35 +497,20 @@ class LyricsPlayerWidget(QWidget): # Rinominated and inheritance changed
         
         self.lyrics_layout.setSpacing(self.FIXED_SPACING) 
         
-        # 1. STYLING GENERALE
-        self.setStyleSheet(f"background-color: {bg_color};")
+        # 1. APPLY STYLING ONLY TO THE DISPLAY CONTAINER
+        if hasattr(self, 'display_container'):
+             self.display_container.setStyleSheet(f"background-color: {bg_color};")
         
         reference_font = QFont("Arial", 12, QFont.Weight.Bold)
         if self.lyric_labels:
             self.lyric_labels[0].setFont(reference_font) 
 
-        # 2. POSIZIONAMENTO SCHERMO (Non necessario per QWidget, ma la logica del font dipende dalle dimensioni)
-        screen_name = settings.get("lyrics_prompter_screen", None)
-        self.available_screens = QApplication.screens()
-        
-        target_screen = QApplication.primaryScreen()
-        if screen_name:
-            for screen in self.available_screens:
-                if screen.name() == screen_name:
-                    target_screen = screen
-                    break
-        
-        # L'unica cosa che facciamo per il posizionamento è informarci sulla geometria per i calcoli del resize.
+        self._update_screen_combo()
         
         self.resize_and_reposition_wrapper(force=True)
-
-
-    def resizeEvent(self, event):
-        """Ricalcola le dimensioni del viewport e del wrapper al ridimensionamento."""
-        super().resizeEvent(event)
-        if self.lyrics_viewport:
-            self.lyrics_viewport.setMask(QRegion(self.lyrics_viewport.rect())) 
-        self.resize_and_reposition_wrapper()
+        
+        saved_screen_name = self.settings.data.get("lyrics_prompter_screen", None)
+        self._toggle_external_window(saved_screen_name)
         
     def resize_and_reposition_wrapper(self, force=False):
         """
@@ -236,9 +520,7 @@ class LyricsPlayerWidget(QWidget): # Rinominated and inheritance changed
         if not self.lyrics_viewport or not self.lyric_labels:
             return
 
-        # --- 1. Calcolo dinamico della dimensione del font (in base alla larghezza) ---
         window_width = self.lyrics_viewport.width()
-        
         CHAR_ASPECT_RATIO = 0.6 
         
         if window_width > 0:
@@ -247,7 +529,6 @@ class LyricsPlayerWidget(QWidget): # Rinominated and inheritance changed
         else:
              self.font_base_size = 48 
              
-        # --- 2. Aggiornamento del font e delle metriche ---
         reference_font = QFont("Arial", self.font_base_size, QFont.Weight.Bold)
         
         reference_label = self.lyric_labels[0]
@@ -262,8 +543,6 @@ class LyricsPlayerWidget(QWidget): # Rinominated and inheritance changed
         spacing = self.FIXED_SPACING
         self.pixel_per_line = label_min_height + spacing
         
-        # --- 3. Calcolo dinamico delle linee visibili (in base all'altezza) ---
-        
         viewport_height = self.lyrics_viewport.height()
         
         if viewport_height > 0 and self.pixel_per_line > 0:
@@ -276,8 +555,6 @@ class LyricsPlayerWidget(QWidget): # Rinominated and inheritance changed
         else:
             new_visible_lines = self.MIN_VISIBLE_LINES
 
-        # --- 4. Ricarica la UI e aggiorna gli stati ---
-        
         if new_visible_lines != self.visible_lines:
              self.visible_lines = new_visible_lines
              self.center_line_index = (self.visible_lines - 1) // 2
@@ -285,8 +562,6 @@ class LyricsPlayerWidget(QWidget): # Rinominated and inheritance changed
              if not self.scrolling_mode:
                  self.update_fixed_labels_count(new_visible_lines)
         
-        # --- 5. Final Layout e Riposizionamento ---
-
         viewport_required_height = viewport_height
 
         self.lyrics_viewport.setMinimumHeight(viewport_required_height)
@@ -323,8 +598,7 @@ class LyricsPlayerWidget(QWidget): # Rinominated and inheritance changed
 
 
         self.lyrics_viewport.setMask(QRegion(self.lyrics_viewport.rect()))
-
-
+        
     def _start_scroll_animation(self, target_line_index: int, force=False):
         """Avvia l'animazione di scorrimento verticale."""
         if not self.scrolling_mode or self.pixel_per_line == 0 or not self.animation:
@@ -345,97 +619,6 @@ class LyricsPlayerWidget(QWidget): # Rinominated and inheritance changed
         self.animation.setDuration(max(100, int(duration))) 
         
         self.animation.start()
-        
-    def reapply_side_font(self, label: QLabel, distance_from_center: int):
-         """
-         Re-applica il font scalato per le righe laterali e lo stile.
-         """
-         
-         settings = self.settings.data
-         font_color = settings.get("lyrics_font_color", "#FFFFFF")
-         highlight_color = settings.get("lyrics_highlight_color", "#00FF00")
-         
-         if distance_from_center == 0:
-             side_font_size = self.font_base_size
-             label.setStyleSheet(f"color: {highlight_color};")
-         else:
-             side_line_count = (self.visible_lines - 1) // 2 
-             
-             scale_factor = 1.0 - (distance_from_center / (side_line_count + 1)) * (1.0 - self.font_scale)
-             
-             side_font_size = int(self.font_base_size * scale_factor)
-             
-             if self.scrolling_mode and distance_from_center >= side_line_count:
-                 side_font_size = int(self.font_base_size * 0.4)
-             
-             label.setStyleSheet(f"color: {font_color};")
-             
-         side_font = QFont("Arial", side_font_size, QFont.Weight.Bold if distance_from_center == 0 else QFont.Weight.Normal)
-         label.setFont(side_font)
-
-    def move_to_screen(self, screen: QScreen):
-        """Sposta la finestra sullo schermo specificato, mantenendo la dimensione attuale se non in fullscreen."""
-        screen_geometry = screen.geometry()
-        self.move(screen_geometry.topLeft() + QPoint(20, 20))
-        
-        if self.is_fullscreen:
-             # This part might need external help if we want to toggle fullscreen from a widget
-             pass
-
-    def toggle_fullscreen(self):
-        """Alterna lo stato fullscreen (da implementare esternamente per un QWidget)."""
-        # Se si tenta il fullscreen da un QWidget embedded, si applica alla MainWindow.
-        # Per ora, lasciamo la logica qui, ma l'attivazione dovrà essere delegata alla MainWindow.
-        pass
-
-    def setup_timer(self):
-        """Configura il timer per l'aggiornamento dei testi."""
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_lyrics_display)
-        self.timer.start(50)
-
-    def update_lyrics_display(self):
-        """Aggiorna le lyrics in base al tempo di riproduzione (Master Clock: AudioEngine)."""
-        
-        current_time_s = self.audio_engine.get_current_time() 
-        duration = self.audio_engine.get_duration()
-        
-        if not self.lyrics_data:
-             return
-        
-        if current_time_s >= duration and duration > 0 and self.audio_engine.is_stopped():
-             self.active_line_index = -1
-             if self.lyrics_wrapper:
-                 self.lyrics_wrapper.move(0, self.target_offset_y)
-             if self.current_line_label:
-                 self.current_line_label.setText("Riproduzione Terminata...")
-             return
-             
-        if self.audio_engine.is_stopped() and current_time_s < 0.1:
-             self.active_line_index = -1
-             if self.lyrics_wrapper:
-                 self.lyrics_wrapper.move(0, self.target_offset_y)
-             if self.current_line_label:
-                 self.current_line_label.setText("Riproduzione Ferma...")
-             return
-             
-        sync_time_s = current_time_s + self.read_ahead_time 
-             
-        new_active_index = -1
-        for i, entry in enumerate(self.lyrics_data):
-            if entry['time'] <= sync_time_s + 0.05: 
-                new_active_index = i
-            else:
-                break
-        
-        if new_active_index != self.active_line_index:
-            self.active_line_index = new_active_index
-            
-            if self.scrolling_mode:
-                 self.update_lyric_labels_continuous() 
-                 self._start_scroll_animation(new_active_index) 
-            else:
-                 self.update_lyric_labels_fixed(new_active_index)
 
     def update_lyric_labels_continuous(self):
         """Aggiorna i testi dei label e gli stili in modalità scorrimento continuo."""
@@ -470,10 +653,40 @@ class LyricsPlayerWidget(QWidget): # Rinominated and inheritance changed
             label.setText(text)
             
             self.reapply_side_font(label, abs(i - self.center_line_index))
-        
+
+    def reapply_side_font(self, label: QLabel, distance_from_center: int):
+         """
+         Re-applica il font scalato per le righe laterali e lo stile.
+         """
+         
+         settings = self.settings.data
+         font_color = settings.get("lyrics_font_color", "#FFFFFF")
+         highlight_color = settings.get("lyrics_highlight_color", "#00FF00")
+         
+         if distance_from_center == 0:
+             side_font_size = self.font_base_size
+             label.setStyleSheet(f"color: {highlight_color};")
+         else:
+             side_line_count = (self.visible_lines - 1) // 2 
+             
+             scale_factor = 1.0 - (distance_from_center / (side_line_count + 1)) * (1.0 - self.font_scale)
+             
+             side_font_size = int(self.font_base_size * scale_factor)
+             
+             if self.scrolling_mode and distance_from_center >= side_line_count:
+                 side_font_size = int(self.font_base_size * 0.4)
+             
+             label.setStyleSheet(f"color: {font_color};")
+             
+         side_font = QFont("Arial", side_font_size, QFont.Weight.Bold if distance_from_center == 0 else QFont.Weight.Normal)
+         label.setFont(side_font)
+
     def closeEvent(self, event):
-        """Intercetta la chiusura per fermare il timer (essendo un QWidget, la chiusura è gestita dal tab)."""
+        """Gestione della chiusura. Chiude la finestra esterna se è aperta."""
         if self.timer.isActive():
             self.timer.stop()
         
+        if self.external_window:
+             self.external_window.close()
+
         super().closeEvent(event)
