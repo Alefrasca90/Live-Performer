@@ -1,0 +1,32 @@
+[
+    {
+        "nome": "PAR LED RGBW (5ch)",
+        "canali": [
+            {
+                "nome": "Dimmer",
+                "funzione": "Intensit\u00e0",
+                "default": 255
+            },
+            {
+                "nome": "Rosso",
+                "funzione": "Colore",
+                "default": 0
+            },
+            {
+                "nome": "Verde",
+                "funzione": "Colore",
+                "default": 0
+            },
+            {
+                "nome": "Blu",
+                "funzione": "Colore",
+                "default": 0
+            },
+            {
+                "nome": "Bianco",
+                "funzione": "Colore",
+                "default": 0
+            }
+        ]
+    }
+]
