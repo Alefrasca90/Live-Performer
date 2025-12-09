@@ -8,16 +8,16 @@ from PyQt6.QtCore import Qt, QTimer
 import soundfile as sf
 # Import adattati
 from ui.views.lyrics_editor_window import LyricsEditorWindow
-from ui.views.lyrics_player_window import LyricsPlayerWindow 
+from ui.views.lyrics_player_window import LyricsPlayerWidget # RIFATTORIZZATO A WIDGET
 from ui.components.midi_monitor_widget import MidiMonitorWidget 
-from core.data_manager import DataManager # AGGIORNATO: Importa l'unico gestore
+from core.data_manager import DataManager
 
 
 class SongEditorWidget(QWidget):
     """
     Widget per la configurazione e l'editing di una singola canzone.
     """
-    def __init__(self, song_name, audio_engine, midi_engine, data_manager, settings_manager=None):
+    def __init__(self, song_name, audio_engine, midi_engine, data_manager, settings_manager=None, lyrics_player_widget: LyricsPlayerWidget | None = None):
         super().__init__()
         self.song_name = song_name
         self.audio_engine = audio_engine
@@ -27,15 +27,14 @@ class SongEditorWidget(QWidget):
         self.loaded_txt_file = None
         self.current_bpm = 120.0 
         
-        self.lyrics_player: LyricsPlayerWindow | None = None
+        # Usa il widget iniettato
+        self.lyrics_player: LyricsPlayerWidget | None = lyrics_player_widget 
         
         self.midi_monitor = MidiMonitorWidget()
         self.midi_engine.midi_message_sent.connect(self.midi_monitor.add_message)
         
         self.init_ui()
         self.load_song()
-        
-        QTimer.singleShot(100, self.open_lyrics_prompter_on_init)
 
     def open_lyrics_prompter_on_init(self):
          """Avvia la finestra LyricsPlayerWindow all'inizializzazione con i dati del brano."""
@@ -647,13 +646,9 @@ class SongEditorWidget(QWidget):
         lyrics_data, _ = self.data_manager.get_lyrics_with_txt(self.song_name)
         has_lyrics = bool(lyrics_data)
         
-        if self.lyrics_player is None:
-             self.open_lyrics_prompter(force_show=True) 
-        
-        self.lyrics_player.set_lyrics_data(lyrics_data, self.song_name)
-        
-        if has_lyrics and not self.lyrics_player.isVisible():
-             self.lyrics_player.show()
+        # Non creiamo il player, lo usiamo se iniettato
+        if self.lyrics_player: 
+             self.lyrics_player.set_lyrics_data(lyrics_data, self.song_name)
         
         self.update_playback_buttons()
 
@@ -665,7 +660,7 @@ class SongEditorWidget(QWidget):
         self.audio_engine.stop_playback(self.song_name)
         self.midi_engine.stop_playback(self.song_name)
         
-        if self.lyrics_player and self.lyrics_player.isVisible():
+        if self.lyrics_player: # Se il player è stato iniettato
             self.lyrics_player.set_lyrics_data([], "Riproduzione Ferma")
             
         self.midi_monitor.add_message(current_time, "[SYSTEM] Playback interrotto.")
@@ -679,28 +674,21 @@ class SongEditorWidget(QWidget):
         has_lyrics = bool(lyrics_data)
 
         if not has_lyrics:
-             if not force_show:
-                 QMessageBox.warning(self, "Attenzione", f"Il brano '{song_name_to_prompt}' non ha lyrics sincronizzati.")
-                 return
-             lyrics_data = []
+             QMessageBox.warning(self, "Attenzione", f"Il brano '{song_name_to_prompt}' non ha lyrics sincronizzati.")
+             return
 
-        if self.lyrics_player is None:
-            self.lyrics_player = LyricsPlayerWindow(
-                audio_engine=self.audio_engine, 
-                midi_engine=self.midi_engine,
-                settings_manager=self.settings_manager,
-                parent=self
-            )
-        
-        self.lyrics_player.set_lyrics_data(lyrics_data, self.song_name)
-
-        if not self.lyrics_player.isVisible() or force_show:
-             self.lyrics_player.show()
+        # L'istanza è gestita esternamente (MainWindow), noi la aggiorniamo e attiviamo il tab
+        if self.lyrics_player:
+            self.lyrics_player.set_lyrics_data(lyrics_data, self.song_name)
+            
+            if self.parent() and hasattr(self.parent(), 'tab_widget'):
+                # Attiva il tab che contiene l'istanza del player lyrics
+                tab_index = self.parent().tab_widget.indexOf(self.lyrics_player)
+                if tab_index != -1:
+                     self.parent().tab_widget.setCurrentIndex(tab_index)
         
         self.update_playback_buttons()
         
     def closeEvent(self, event):
          self.stop_playback()
-         if self.lyrics_player:
-              self.lyrics_player.close() 
          super().closeEvent(event)

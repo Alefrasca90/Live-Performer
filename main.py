@@ -1,9 +1,8 @@
 # main_unified.py (Entry point del software unificato)
 
 import sys
-# CORREZIONE: QAction e QIcon sono importati da PyQt6.QtGui
-from PyQt6.QtWidgets import QApplication, QMainWindow, QTabWidget, QStatusBar, QToolBar, QMessageBox, QLabel
-from PyQt6.QtGui import QAction, QIcon # Correzione: QAction e QIcon da QtGui
+from PyQt6.QtWidgets import QApplication, QMainWindow, QTabWidget, QStatusBar, QToolBar, QMessageBox, QLabel, QWidget, QVBoxLayout
+from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtCore import Qt, QSize
 
 # --- 1. Import dei Componenti Core ---
@@ -15,6 +14,18 @@ from ui.components.settings_manager import SettingsManager
 # --- 2. Import dei Componenti UI Refactorizzati (Widget) ---
 from ui.views.dmx_control_widget import DMXControlWidget 
 from ui.views.scenografia_daw_widget import ScenografiaDAWWidget 
+from ui.views.stage_view import StageViewWidget # Importato il widget rifattorizzato
+from ui.views.lyrics_player_window import LyricsPlayerWidget # Importato il widget lyrics rifattorizzato
+
+# --- New Placeholder Widgets for new tabs ---
+class VideoPlaceholderWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Video Playback (Implementazione futura)"))
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+# --- End Placeholder Widgets ---
+
 
 class UnifiedMainWindow(QMainWindow):
     
@@ -28,6 +39,17 @@ class UnifiedMainWindow(QMainWindow):
         self.midi_engine = MidiEngine() 
         self.scenografia_data_manager = DataManager() 
         self.settings_manager = SettingsManager()
+
+        # --- Stage View and Lyrics Widgets (Instantiated by MainWindow for embedding) ---
+        self.stage_view_widget = StageViewWidget() 
+        # INJECTION POINT: Instanziazione del Lyrics Player come QWidget
+        self.lyrics_player_widget = LyricsPlayerWidget(
+            audio_engine=self.audio_engine, 
+            midi_engine=self.midi_engine,
+            settings_manager=self.settings_manager,
+            parent=self
+        )
+        self.video_widget = VideoPlaceholderWidget()
         
         # --- 4. Setup Main UI (Tabs) ---
         tab_widget = QTabWidget()
@@ -37,116 +59,137 @@ class UnifiedMainWindow(QMainWindow):
         # Inizializza la Status Bar
         self.setStatusBar(QStatusBar())
 
-        # --- 5. DMX Tab ---
-        self.dmx_widget = DMXControlWidget(
-            audio_engine=self.audio_engine,
-            midi_engine=self.midi_engine,
-            settings_manager=self.settings_manager,
-            parent=self
-        )
-        tab_widget.addTab(self.dmx_widget, "DMX Controllo Luci")
-        
-        # --- 6. Scenografia Tab ---
+        # --- 5. Media Tab (FIRST) ---
         self.scenografia_widget = ScenografiaDAWWidget(
             audio_engine=self.audio_engine, 
             midi_engine=self.midi_engine, 
             data_manager=self.scenografia_data_manager, 
             settings_manager=self.settings_manager,
+            lyrics_player_widget=self.lyrics_player_widget, # INJECTED
             parent=self
         )
-        tab_widget.addTab(self.scenografia_widget, "Scenografia Media & Lyrics")
+        tab_widget.addTab(self.scenografia_widget, "Media")
         
-        # --- 7. Setup Menu Bar e Toolbar (CENTRALE) ---
+        # --- 6. Video Tab (SECOND) ---
+        tab_widget.addTab(self.video_widget, "Video")
+        
+        # --- 7. Lyrics Tab (THIRD) ---
+        tab_widget.addTab(self.lyrics_player_widget, "Lyrics") # ADD THE ACTUAL WIDGET
+
+        # --- 8. Fixtures Tab (FOURTH) ---
+        self.dmx_widget = DMXControlWidget(
+            audio_engine=self.audio_engine,
+            midi_engine=self.midi_engine,
+            settings_manager=self.settings_manager,
+            stage_view=self.stage_view_widget, # INJECTED
+            parent=self
+        )
+        tab_widget.addTab(self.dmx_widget, "Fixtures")
+        
+        # --- 9. Stage Tab (FIFTH) ---
+        tab_widget.addTab(self.stage_view_widget, "Stage") # Embedded Stage View
+
+        # --- 10. Setup Menu Bar (CENTRALE) ---
         self._setup_menu_bar()
         
-        # --- 8. Applica Stile Comune ---
+        # --- 11. Applica Stile Comune ---
         self._apply_style()
 
     def _setup_menu_bar(self):
-        """Crea il QMenuBar e la Toolbar con le azioni File/Settings/Info + DMX."""
+        """Crea il QMenuBar e implementa i menu File/Strumenti/Impostazioni/Info."""
         
         menu_bar = self.menuBar()
         
+        # ====================================================
+        # AZIONI CONDIVISE
+        # ====================================================
+        
+        save_action = QAction(QIcon.fromTheme("document-save"), "Salva Progetto DMX...", self)
+        save_action.triggered.connect(self.dmx_widget.salva_progetto_a_file)
+        
+        load_action = QAction(QIcon.fromTheme("document-open"), "Carica Progetto DMX...", self)
+        load_action.triggered.connect(self.dmx_widget.carica_progetto_da_file)
+        
+        reconnect_action = QAction(QIcon.fromTheme("network-transmit-receive"), "Riconnetti DMX", self)
+        reconnect_action.triggered.connect(self.dmx_widget._handle_dmx_connection)
+
+
         # ====================================================
         # MENU FILE
         # ====================================================
         file_menu = menu_bar.addMenu("File")
         
-        # Salva Progetto DMX
-        save_action = QAction(QIcon.fromTheme("document-save"), "Salva Progetto DMX...", self)
-        save_action.triggered.connect(self.dmx_widget.salva_progetto_a_file)
         file_menu.addAction(save_action)
-        
-        # Carica Progetto DMX
-        load_action = QAction(QIcon.fromTheme("document-open"), "Carica Progetto DMX...", self)
-        load_action.triggered.connect(self.dmx_widget.carica_progetto_da_file)
         file_menu.addAction(load_action)
-
         file_menu.addSeparator()
 
-        # Uscita
         exit_action = QAction(QIcon.fromTheme("application-exit"), "Esci", self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
-
+        
         # ====================================================
-        # MENU SETTINGS
+        # MENU STRUMENTI
+        # ====================================================
+        tools_menu = menu_bar.addMenu("Strumenti")
+        
+        # Stage View
+        stage_action = QAction(QIcon.fromTheme("view-stage"), "Stage View (Posizioni Luci)", self)
+        stage_action.triggered.connect(self.dmx_widget._open_stage_view)
+        tools_menu.addAction(stage_action)
+
+        # Editor Modelli
+        editor_action = QAction(QIcon.fromTheme("document-edit"), "Editor Modelli Fixture", self)
+        editor_action.triggered.connect(self.dmx_widget._open_fixture_editor)
+        tools_menu.addAction(editor_action)
+
+        # Mappature MIDI
+        midi_map_action = QAction(QIcon.fromTheme("preferences-desktop-keyboard-shortcuts"), "Mappature MIDI Input", self)
+        midi_map_action.triggered.connect(self.dmx_widget._open_midi_mapping_dialog)
+        tools_menu.addAction(midi_map_action)
+        
+        # ====================================================
+        # MENU IMPOSTAZIONI
         # ====================================================
         settings_menu = menu_bar.addMenu("Impostazioni")
         
-        # Settings Dialog
+        # Settings Dialog (Generali)
         settings_action = QAction(QIcon.fromTheme("preferences-system"), "Audio / MIDI / Display...", self)
         settings_action.triggered.connect(self.dmx_widget._open_settings_dialog)
         settings_menu.addAction(settings_action)
         
         settings_menu.addSeparator()
 
-        # Azioni DMX (Spostate dalla DMXControlWidget Toolbar)
-        
-        # CORREZIONE ERRORE: QMenu non ha addWidget. Usiamo addSeparator.
-        settings_menu.addSeparator() 
-
-        # Stage View
-        stage_action = QAction(QIcon.fromTheme("view-stage"), "Stage View", self)
-        stage_action.triggered.connect(self.dmx_widget._open_stage_view)
-        settings_menu.addAction(stage_action)
-
-        # Editor Modelli
-        editor_action = QAction(QIcon.fromTheme("document-edit"), "Editor Modelli Fixture", self)
-        editor_action.triggered.connect(self.dmx_widget._open_fixture_editor)
-        settings_menu.addAction(editor_action)
-
-        # Mappature MIDI
-        midi_map_action = QAction(QIcon.fromTheme("preferences-desktop-keyboard-shortcuts"), "Mappature MIDI Input", self)
-        midi_map_action.triggered.connect(self.dmx_widget._open_midi_mapping_dialog)
-        settings_menu.addAction(midi_map_action)
-
         # Riconnetti DMX
-        reconnect_action = QAction(QIcon.fromTheme("network-transmit-receive"), "Riconnetti DMX", self)
-        reconnect_action.triggered.connect(self.dmx_widget._handle_dmx_connection)
         settings_menu.addAction(reconnect_action)
-
-
+        
         # ====================================================
         # MENU INFO
         # ====================================================
         info_menu = menu_bar.addMenu("Info")
         
-        # Info Software
         info_action = QAction(QIcon.fromTheme("help-about"), "Informazioni Software", self)
         info_action.triggered.connect(self.dmx_widget._show_info_dialog)
         info_menu.addAction(info_action)
         
-        # Aggiungi i controlli DMX più usati alla toolbar principale
-        toolbar = QToolBar("Controlli Principali")
+        # --- TOOLBAR PRINCIPALE (CONTROLLI RAPIDI) ---
+        toolbar = QToolBar("Controlli Rapidi")
         self.addToolBar(toolbar)
         toolbar.setIconSize(QSize(24, 24))
+        
+        # Aggiungi azioni File
         toolbar.addAction(save_action)
         toolbar.addAction(load_action)
         toolbar.addSeparator()
+        
+        # Aggiungi azioni Strumenti
         toolbar.addAction(stage_action)
+        toolbar.addAction(editor_action) 
         toolbar.addAction(midi_map_action)
-        toolbar.addAction(reconnect_action)
+        toolbar.addSeparator()
+        
+        # Aggiungi azione Impostazioni
+        toolbar.addAction(settings_action)
+
 
     def _apply_style(self):
         # Applica lo stile scuro/moderno a tutta l'app

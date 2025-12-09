@@ -1,10 +1,9 @@
-# ui/stage_view.py (SOVRASCRIVI COMPLETAMENTE)
+# ui/views/stage_view.py (Refactored to StageViewWidget - QWidget for embedding)
 
-from PyQt6.QtWidgets import QDialog, QWidget, QHBoxLayout, QLabel, QFrame, QVBoxLayout
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QFrame, QVBoxLayout 
 from PyQt6.QtCore import Qt, QPoint, pyqtSignal
 from PyQt6.QtGui import QMouseEvent
 
-# Import corretto per la struttura unificata: IstanzaFixtureStato è un modello core.
 from core.project_models import IstanzaFixtureStato 
 
 class DraggableLightWidget(QFrame):
@@ -17,25 +16,20 @@ class DraggableLightWidget(QFrame):
         self.fixture_stato = fixture_stato
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         
-        # 1. Aumento l'altezza per far spazio all'etichetta sotto (80 per il cerchio + 20 per l'etichetta)
         self.setGeometry(fixture_stato.x, fixture_stato.y, 80, 100) 
         self.setObjectName(f"LightWidgetContainer_{fixture_stato.indirizzo_inizio}")
         
-        # Layout principale verticale per impilare luce e nome
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(2) # Piccolo spazio tra cerchio e nome
+        main_layout.setSpacing(2) 
         
-        # 2. Area del Cerchio (il QFrame originale)
         self.light_circle = QFrame(self)
-        self.light_circle.setFixedSize(80, 80) # Dimensioni fisse per il cerchio
+        self.light_circle.setFixedSize(80, 80) 
         self.light_circle.setObjectName(f"Light_{fixture_stato.indirizzo_inizio}")
         main_layout.addWidget(self.light_circle)
         
-        # 3. Etichetta del Nome (sotto il cerchio)
         modello_nome_breve = fixture_stato.modello_nome.replace(" (Virtuale)", "")
         
-        # Usa il nome utente se fornito, altrimenti il nome breve del modello
         if fixture_stato.nome_utente:
             label_text = f"{fixture_stato.nome_utente} @{fixture_stato.indirizzo_inizio}"
         else:
@@ -56,10 +50,8 @@ class DraggableLightWidget(QFrame):
         luminosity = (r * 0.299 + g * 0.587 + b * 0.114)
         text_color = "white" if luminosity < 128 else "black"
         
-        # Applica lo stile del testo solo all'etichetta del nome (sotto)
         self.label.setStyleSheet(f"color: white; font-weight: bold; background-color: transparent;")
         
-        # Applica lo stile di luce al QFrame interno (il cerchio)
         self.light_circle.setStyleSheet(f"""
             QFrame#{self.light_circle.objectName()} {{
                 background-color: rgb({r}, {g}, {b});
@@ -69,7 +61,6 @@ class DraggableLightWidget(QFrame):
         """)
         
     def mousePressEvent(self, event: QMouseEvent):
-        # La logica di trascinamento rimane sul contenitore principale (self)
         if event.button() == Qt.MouseButton.LeftButton:
             self._old_pos = event.pos()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
@@ -89,29 +80,23 @@ class DraggableLightWidget(QFrame):
             self._old_pos = None
             self.setCursor(Qt.CursorShape.OpenHandCursor)
             
-            # Quando il widget viene rilasciato, salviamo la posizione. Il nome è già nel fixture_stato.
             self.fixture_stato.x = self.x()
             self.fixture_stato.y = self.y()
             
             self.moved.emit(self.fixture_stato)
             
 
-class StageViewDialog(QDialog):
-    """Finestra di visualizzazione scenica ridimensionabile."""
+class StageViewWidget(QWidget): # Rinomination and inheritance change
+    """Widget di visualizzazione scenica incorporabile."""
     def __init__(self, parent=None, istanze_stato: list[IstanzaFixtureStato] = None):
         super().__init__(parent)
-        self.setWindowTitle("Stage View (Trascinamento)")
-        self.resize(800, 600)
         
-        # 1. Layout principale del Dialog
         main_layout = QHBoxLayout(self) 
         
         # 2. Stage area: Contenitore per le luci
         self.stage_area = QWidget()
         self.stage_area.setMinimumSize(400, 300)
         self.stage_area.setStyleSheet("background-color: #222; border: 1px dashed #444;")
-        
-        # La Stage Area non deve avere un layout per permettere il posizionamento assoluto
         
         main_layout.addWidget(self.stage_area)
 
@@ -120,10 +105,9 @@ class StageViewDialog(QDialog):
         if istanze_stato:
             self._popola_stage(istanze_stato)
         
-        # Rimosso il flag Qt.WindowType.WindowStaysOnTopHint per permettere alle altre finestre di sovrapporsi
-        self.setWindowFlags(self.windowFlags())
-
-
+        # Alias per compatibilità con i Mixin che si aspettano un QDialog-like object
+        self.stage_view = self 
+            
     def _popola_stage(self, istanze_stato: list[IstanzaFixtureStato]):
         """Crea i widget luci trascinabili."""
         main_window_parent = self.parent()
@@ -134,11 +118,9 @@ class StageViewDialog(QDialog):
                 light_widget.show()
                 self.light_widgets[stato.indirizzo_inizio] = light_widget
                 
-                if main_window_parent:
-                     # NOTA: La MainWindow deve avere il metodo _update_fixture_position (definito in ProjectAndViewMixin)
-                     # Se il parent non è la MainWindow, la connessione fallirà, ma non darà errore se il parent non è None
-                     light_widget.moved.connect(main_window_parent._update_fixture_position)
-
+                # Questa connessione deve avvenire esternamente dal DMXControlWidget iniettato
+                pass 
+                     
     def update_light_color(self, addr_inizio: int, r: float, g: float, b: float):
         """Aggiorna il colore di un widget luce specifico."""
         widget = self.light_widgets.get(addr_inizio)
@@ -146,15 +128,15 @@ class StageViewDialog(QDialog):
             widget._set_widget_style(r, g, b)
             
     def clear_and_repopulate(self, istanze_stato: list[IstanzaFixtureStato]):
-        """Rimuove tutti i widget e li ricrea, usato dopo il cambio di Universo."""
+        """Rimuove tutti i widget e li ricrea."""
         for widget in list(self.light_widgets.values()):
-            try:
-                # Disconnette il segnale per evitare riferimenti alla vecchia MainWindow
-                widget.moved.disconnect() 
-            except TypeError:
-                pass
             widget.deleteLater()
             
         self.light_widgets.clear()
         
         self._popola_stage(istanze_stato)
+        
+    # Dummy QDialog methods required by old code (like Mixins/DMXControlWidget initialization)
+    def show(self): self.setVisible(True)
+    def close(self): self.setVisible(False)
+    def activateWindow(self): self.setFocus(True)

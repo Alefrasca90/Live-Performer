@@ -1,3 +1,5 @@
+# ui/views/scenografia_daw_widget.py
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QLabel,
     QPushButton, QSplitter, QInputDialog, QMessageBox
@@ -8,13 +10,14 @@ from PyQt6.QtCore import Qt, QMimeData
 # Import dei componenti (Media/App)
 from engines.audio_engine import AudioEngine
 from engines.midi_engine import MidiEngine
-from core.data_manager import DataManager as ScenografiaDataManager # AGGIORNATO: Importa l'unico gestore
+from core.data_manager import DataManager as ScenografiaDataManager
 from ui.components.settings_manager import SettingsManager
+from ui.views.lyrics_player_window import LyricsPlayerWidget # Importato LyricsPlayerWidget
 
 # Import delle Views/Components
 from ui.views.song_editor_widget import SongEditorWidget
 from ui.components.settings_dialog import SettingsDialog
-from ui.views.playlist_editor_widget import PlaylistEditorWidget
+from ui.views.playlist_editor_widget import PlaylistEditorWidget 
 
 
 class SongListWidget(QListWidget):
@@ -32,12 +35,13 @@ class SongListWidget(QListWidget):
 
 
 class ScenografiaDAWWidget(QWidget):
-    def __init__(self, audio_engine: AudioEngine, midi_engine: MidiEngine, data_manager: ScenografiaDataManager, settings_manager: SettingsManager, parent=None):
+    def __init__(self, audio_engine: AudioEngine, midi_engine: MidiEngine, data_manager: ScenografiaDataManager, settings_manager: SettingsManager, lyrics_player_widget: LyricsPlayerWidget, parent=None):
         super().__init__(parent)
         self.audio_engine = audio_engine
         self.midi_engine = midi_engine
         self.data_manager = data_manager
         self.settings_manager = settings_manager
+        self.lyrics_player_widget = lyrics_player_widget # Store the dependency
         self.current_editor = None 
 
         self.init_ui()
@@ -126,7 +130,8 @@ class ScenografiaDAWWidget(QWidget):
             self.audio_engine,
             self.midi_engine,
             self.data_manager,
-            self.settings_manager
+            self.settings_manager,
+            lyrics_player_widget=self.lyrics_player_widget # PASS THE DEPENDENCY
         )
         self.show_editor(editor)
 
@@ -138,7 +143,8 @@ class ScenografiaDAWWidget(QWidget):
             self.audio_engine,
             self.midi_engine,
             self.data_manager,
-            self.settings_manager 
+            self.settings_manager,
+            lyrics_player_widget=self.lyrics_player_widget # PASS THE DEPENDENCY
         )
         self.show_editor(editor)
 

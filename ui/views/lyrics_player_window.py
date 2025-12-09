@@ -1,14 +1,13 @@
 import sys
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QApplication, QPushButton, QWidget, QSizePolicy
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QApplication, QPushButton, QSizePolicy
 from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QPoint, QEasingCurve 
 from PyQt6.QtGui import QFont, QScreen, QRegion, QFontMetrics
 from math import floor
 import time
 
-class LyricsPlayerWindow(QDialog):
+class LyricsPlayerWidget(QWidget): # Rinominated and inheritance changed
     """
-    Finestra che visualizza i lyrics sincronizzati su uno schermo scelto (teleprompter).
-    Si comporta come una finestra persistente (non modale).
+    Widget che visualizza i lyrics sincronizzati (incorporabile in un tab).
     """
     # Nuove costanti per il ridimensionamento automatico
     TARGET_CHARS = 60 # Numero di caratteri orizzontali di riferimento
@@ -18,10 +17,9 @@ class LyricsPlayerWindow(QDialog):
     
     def __init__(self, audio_engine, midi_engine, settings_manager, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Lyrics Prompter") 
+        self.setWindowTitle("Lyrics Prompter") # Keep title for consistency
         
-        # IMPOSTAZIONE DIMENSIONI INIZIALI E STATO
-        self.resize(200, 200) # Dimensione di default 200x200
+        self.resize(200, 200) 
         self.setMinimumSize(200, 200) 
         
         self.audio_engine = audio_engine
@@ -30,7 +28,7 @@ class LyricsPlayerWindow(QDialog):
         self.lyrics_data = [] 
         
         self.active_line_index = -1
-        self.is_fullscreen = False 
+        self.is_fullscreen = False # Still managed, but toggle is done via main app
         
         # Carica le impostazioni dinamiche
         settings_data = self.settings.data
@@ -38,16 +36,14 @@ class LyricsPlayerWindow(QDialog):
         self.scrolling_mode = settings_data.get("lyrics_scrolling_mode", True)
         
         # Inizializzazione per il calcolo dinamico
-        self.visible_lines = self.MIN_VISIBLE_LINES # Minimo iniziale
+        self.visible_lines = self.MIN_VISIBLE_LINES 
         self.center_line_index = (self.visible_lines - 1) // 2
-        self.font_base_size = 48 # Dimensione iniziale di fallback
+        self.font_base_size = 48 
         
-        # Lista di QLabel per le lyrics
         self.lyric_labels: list[QLabel] = []
         self.font_scale = 0.5 
         self.current_line_label = None 
         
-        # Nuove variabili per l'animazione e lo scorrimento
         self.lyrics_viewport: QWidget | None = None
         self.lyrics_wrapper: QWidget | None = None
         self.lyrics_layout: QVBoxLayout | None = None
@@ -59,22 +55,18 @@ class LyricsPlayerWindow(QDialog):
         self.init_ui()
         self.setup_timer()
         
-        # Rende la finestra non modale (non blocca l'UI principale) e la mantiene sopra
-        self.setModal(False)
-        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
+        # --- Rimosso setWindowFlags e setModal: ora è un QWidget incorporato ---
 
     def update_fixed_labels_count(self, target_count):
         """Aggiunge o rimuove i QLabel per adattarsi al numero di linee visibili (solo in Fixed Mode)."""
         current_count = len(self.lyric_labels)
         
-        # Rimuovi i label in eccesso
         if target_count < current_count:
             for _ in range(current_count - target_count):
                 label = self.lyric_labels.pop()
                 self.lyrics_layout.removeWidget(label)
                 label.deleteLater()
         
-        # Aggiungi i label mancanti
         elif target_count > current_count:
             for _ in range(target_count - current_count):
                 label = QLabel()
@@ -83,29 +75,25 @@ class LyricsPlayerWindow(QDialog):
                 self.lyrics_layout.addWidget(label)
                 self.lyric_labels.append(label)
 
-        # Aggiorna il riferimento alla linea centrale
         if self.lyric_labels:
              self.center_line_index = (target_count - 1) // 2
              self.current_line_label = self.lyric_labels[self.center_line_index]
         else:
              self.center_line_index = 0
-             self.current_line_label = QLabel(self.lyrics_wrapper) # Fallback
+             self.current_line_label = QLabel(self.lyrics_wrapper)
 
     def reload_ui_for_new_data(self, lyrics_count):
         """Prepara l'UI per il caricamento di nuovi dati (rimuove/ricrea i label se necessario)."""
         
-        # In modalità Scrolling, ricrea tutti i label in base al numero di righe totali
         if self.scrolling_mode:
             current_count = len(self.lyric_labels)
             
-            # Rimuovi i label in eccesso
             if lyrics_count < current_count:
                 for _ in range(current_count - lyrics_count):
                     label = self.lyric_labels.pop()
                     self.lyrics_layout.removeWidget(label)
                     label.deleteLater()
             
-            # Aggiungi i label mancanti
             elif lyrics_count > current_count:
                 for _ in range(lyrics_count - current_count):
                     label = QLabel()
@@ -114,13 +102,11 @@ class LyricsPlayerWindow(QDialog):
                     self.lyrics_layout.addWidget(label)
                     self.lyric_labels.append(label)
 
-            # Il centro non è usato, la riga 0 è la riga attiva (per il centramento)
             if self.lyric_labels:
                  self.current_line_label = self.lyric_labels[0]
             else:
                  self.current_line_label = QLabel(self.lyrics_wrapper)
 
-        # In modalità Fixed, i label sono aggiornati in resize_and_reposition_wrapper
         elif not self.lyric_labels:
              self.update_fixed_labels_count(self.MIN_VISIBLE_LINES)
              
@@ -128,23 +114,19 @@ class LyricsPlayerWindow(QDialog):
     def set_lyrics_data(self, lyrics_data: list[dict], song_name: str):
         """Aggiorna i dati dei lyrics e la UI, ricaricando i QLabel se necessario."""
         
-        # 1. Imposta i nuovi dati
         self.lyrics_data = sorted(lyrics_data, key=lambda x: x['time'])
         self.active_line_index = -1
         self.setWindowTitle(f"Lyrics Prompter - {song_name}")
         
-        # 2. Ricarica la UI per i nuovi dati (gestisce anche il caso di dati vuoti)
         self.reload_ui_for_new_data(len(self.lyrics_data)) 
         
         if not self.lyrics_data and self.lyric_labels:
              if len(self.lyric_labels) > self.center_line_index:
                  self.lyric_labels[self.center_line_index].setText(f"Nessun lyric sincronizzato: {song_name}")
         
-        # 3. Applica gli stili e ricalcola le dimensioni/posizionamento
         self.apply_settings()
         self.resize_and_reposition_wrapper(force=True)
         
-        # 4. Forza l'aggiornamento immediato del display per sincronizzare
         self.update_lyrics_display()
 
     def keyPressEvent(self, event):
@@ -164,37 +146,30 @@ class LyricsPlayerWindow(QDialog):
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
         
-        # AREA DI CONTROLLO (Rimuoviamo gli stretch e usiamo un layout per il pulsante F11)
-        # Questo serve per consentire all'utente di passare in Fullscreen.
+        # AREA DI CONTROLLO
         controls_layout = QHBoxLayout()
-        # Rimuoviamo il bottone, ma manteniamo il layout per coerenza
-        # Inseriamo un placeholder invisibile per occupare lo spazio minimo
         self.btn_fullscreen = QPushButton("F11")
         self.btn_fullscreen.setVisible(False)
         controls_layout.addWidget(self.btn_fullscreen)
         controls_layout.addStretch()
         
-        # Aggiungiamo l'area controlli all'inizio del layout principale
         main_layout.addLayout(controls_layout) 
 
-        # AREA VISUALIZZAZIONE LYRICS (Questa si espanderà)
-        
-        # 1. Viewport (Area visibile che esegue il clipping del contenuto)
+        # 1. Viewport 
         self.lyrics_viewport = QWidget()
         self.lyrics_viewport.setContentsMargins(0, 0, 0, 0)
         
-        # Assegniamo l'espansione massima al viewport (stretch factor 1)
         main_layout.addWidget(self.lyrics_viewport, 1) 
         
-        # 2. Wrapper (Il contenuto che scorre) - Parented al viewport
+        # 2. Wrapper
         self.lyrics_wrapper = QWidget(self.lyrics_viewport)
         self.lyrics_wrapper.setObjectName("LyricsWrapper")
 
-        # 3. Layout dentro il wrapper (per calcolare le altezze)
+        # 3. Layout dentro il wrapper 
         self.lyrics_layout = QVBoxLayout(self.lyrics_wrapper)
         self.lyrics_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Creiamo un set minimo di QLabel per inizializzare l'UI (le linee visibili)
+        # Creiamo un set minimo di QLabel
         for i in range(self.MIN_VISIBLE_LINES): 
             label = QLabel()
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -210,8 +185,6 @@ class LyricsPlayerWindow(QDialog):
         self.animation = QPropertyAnimation(self.lyrics_wrapper, b'pos')
         self.animation.setDuration(400) 
         self.animation.setEasingCurve(QEasingCurve.Type.InOutQuad) 
-            
-        # Rimosso: main_layout.addStretch() finale
 
     def apply_settings(self):
         """Applica le impostazioni di styling e schermo dal SettingsManager."""
@@ -223,19 +196,16 @@ class LyricsPlayerWindow(QDialog):
         self.read_ahead_time = settings.get("lyrics_read_ahead_time", 1.0)
         self.scrolling_mode = settings.get("lyrics_scrolling_mode", True)
         
-        # IMPOSTA SPAZIAMENTO A ZERO
         self.lyrics_layout.setSpacing(self.FIXED_SPACING) 
         
         # 1. STYLING GENERALE
         self.setStyleSheet(f"background-color: {bg_color};")
         
-        # La dimensione del font verrà calcolata in resize_and_reposition_wrapper
-        # Per ora, applichiamo un font di riferimento, verrà aggiornato subito dopo.
         reference_font = QFont("Arial", 12, QFont.Weight.Bold)
         if self.lyric_labels:
             self.lyric_labels[0].setFont(reference_font) 
 
-        # 2. POSIZIONAMENTO SCHERMO (Dalle Impostazioni)
+        # 2. POSIZIONAMENTO SCHERMO (Non necessario per QWidget, ma la logica del font dipende dalle dimensioni)
         screen_name = settings.get("lyrics_prompter_screen", None)
         self.available_screens = QApplication.screens()
         
@@ -246,10 +216,8 @@ class LyricsPlayerWindow(QDialog):
                     target_screen = screen
                     break
         
-        # Sposta la finestra sullo schermo target, mantenendo la dimensione attuale.
-        self.move_to_screen(target_screen)
+        # L'unica cosa che facciamo per il posizionamento è informarci sulla geometria per i calcoli del resize.
         
-        # Ricalcola le dimensioni e la posizione del contenuto
         self.resize_and_reposition_wrapper(force=True)
 
 
@@ -274,16 +242,14 @@ class LyricsPlayerWindow(QDialog):
         CHAR_ASPECT_RATIO = 0.6 
         
         if window_width > 0:
-            # Calcola la dimensione del font (in punti) necessaria per contenere TARGET_CHARS
             calculated_font_size_width = int(window_width / (self.TARGET_CHARS * CHAR_ASPECT_RATIO))
-            self.font_base_size = max(10, calculated_font_size_width) # Minimo di 10pt
+            self.font_base_size = max(10, calculated_font_size_width) 
         else:
-             self.font_base_size = 48 # Fallback
+             self.font_base_size = 48 
              
         # --- 2. Aggiornamento del font e delle metriche ---
         reference_font = QFont("Arial", self.font_base_size, QFont.Weight.Bold)
         
-        # Applica il font al primo label (usato come riferimento)
         reference_label = self.lyric_labels[0]
         reference_label.setFont(reference_font) 
         font_metrics = QFontMetrics(reference_font)
@@ -298,11 +264,9 @@ class LyricsPlayerWindow(QDialog):
         
         # --- 3. Calcolo dinamico delle linee visibili (in base all'altezza) ---
         
-        # Legge l'altezza attuale del viewport (quella che Qt ha deciso che può avere)
         viewport_height = self.lyrics_viewport.height()
         
         if viewport_height > 0 and self.pixel_per_line > 0:
-            # Calcola quante linee intere di QUELLA dimensione rientrano
             calculated_visible_lines = floor((viewport_height + spacing) / self.pixel_per_line)
             
             if calculated_visible_lines % 2 == 0:
@@ -319,52 +283,40 @@ class LyricsPlayerWindow(QDialog):
              self.center_line_index = (self.visible_lines - 1) // 2
              
              if not self.scrolling_mode:
-                 # In modalità fissa, dobbiamo aggiungere/rimuovere i label.
                  self.update_fixed_labels_count(new_visible_lines)
         
         # --- 5. Final Layout e Riposizionamento ---
 
-        viewport_required_height = viewport_height # L'altezza è quella decisa da Qt
+        viewport_required_height = viewport_height
 
         self.lyrics_viewport.setMinimumHeight(viewport_required_height)
         self.lyrics_viewport.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
-        # Calcolo l'altezza totale del wrapper
         if not self.scrolling_mode:
-            # In modalità fissa, l'altezza del wrapper è determinata da visible_lines
             total_height = int(self.visible_lines * self.pixel_per_line - spacing)
         else:
              total_height = int(len(self.lyric_labels) * self.pixel_per_line - spacing)
              
         self.lyrics_wrapper.resize(self.lyrics_viewport.width(), total_height)
         
-        # Applica l'altezza minima a tutti i label e lo stile corretto (con la nuova dimensione)
         for i, label in enumerate(self.lyric_labels):
             label.setMinimumHeight(self.pixel_per_line - spacing)
             
-            # Applica il font scalato (anche per la linea attiva/non attiva)
             distance_from_center = abs(i - self.center_line_index)
             self.reapply_side_font(label, distance_from_center) 
         
         current_viewport_height = self.lyrics_viewport.height()
         
-        # Calcola l'offset per centrare la linea
         self.target_offset_y = int(current_viewport_height / 2 - self.pixel_per_line / 2)
         
-        # --- FIX: Riposiziona immediatamente il wrapper per centrare ---
-        
         if self.scrolling_mode:
-            # SCROLLING MODE: La riga da centrare è self.active_line_index nel set di tutti i lyrics.
             if self.active_line_index >= 0:
                 target_y_scrolling = int(self.target_offset_y - (self.active_line_index * self.pixel_per_line))
                 self.lyrics_wrapper.move(0, target_y_scrolling)
                 self._start_scroll_animation(self.active_line_index, force=force)
             elif self.active_line_index < 0 or force:
-                 # Posizione iniziale (centra la riga 0)
                  self.lyrics_wrapper.move(0, self.target_offset_y)
         else:
-            # FIXED MODE: Centra la riga fisica centrale (self.center_line_index)
-            # target_y_fixed è la posizione necessaria per far cadere la riga self.center_line_index al centro geometrico del viewport.
             target_y_fixed = int((current_viewport_height / 2) - 
                                  (self.center_line_index * self.pixel_per_line + self.pixel_per_line / 2))
             self.lyrics_wrapper.move(0, target_y_fixed)
@@ -424,22 +376,17 @@ class LyricsPlayerWindow(QDialog):
     def move_to_screen(self, screen: QScreen):
         """Sposta la finestra sullo schermo specificato, mantenendo la dimensione attuale se non in fullscreen."""
         screen_geometry = screen.geometry()
-        # Sposta la finestra in modo che sia visibile nell'angolo superiore sinistro del nuovo schermo.
         self.move(screen_geometry.topLeft() + QPoint(20, 20))
         
-        # Se siamo in fullscreen, forziamo il resize (questo viene fatto solo durante il toggle_fullscreen)
         if self.is_fullscreen:
-             self.resize(screen_geometry.size())
-
+             # This part might need external help if we want to toggle fullscreen from a widget
+             pass
 
     def toggle_fullscreen(self):
-        """Alterna lo stato fullscreen (usato da F11 e dal pulsante)."""
-        if self.is_fullscreen:
-            self.showNormal()
-            self.is_fullscreen = False
-        else:
-            self.showFullScreen()
-            self.is_fullscreen = True
+        """Alterna lo stato fullscreen (da implementare esternamente per un QWidget)."""
+        # Se si tenta il fullscreen da un QWidget embedded, si applica alla MainWindow.
+        # Per ora, lasciamo la logica qui, ma l'attivazione dovrà essere delegata alla MainWindow.
+        pass
 
     def setup_timer(self):
         """Configura il timer per l'aggiornamento dei testi."""
@@ -453,11 +400,9 @@ class LyricsPlayerWindow(QDialog):
         current_time_s = self.audio_engine.get_current_time() 
         duration = self.audio_engine.get_duration()
         
-        # Se non ci sono dati lyrics, non eseguire la logica di aggiornamento
         if not self.lyrics_data:
              return
         
-        # Logica di stop fine brano
         if current_time_s >= duration and duration > 0 and self.audio_engine.is_stopped():
              self.active_line_index = -1
              if self.lyrics_wrapper:
@@ -498,7 +443,6 @@ class LyricsPlayerWindow(QDialog):
         lyrics_count = len(self.lyrics_data)
         
         for i, label in enumerate(self.lyric_labels):
-            # Il testo visualizzato corrisponde direttamente alla riga del brano
             if i < lyrics_count:
                 text = self.lyrics_data[i]["line"]
             else:
@@ -518,7 +462,6 @@ class LyricsPlayerWindow(QDialog):
         for i, label in enumerate(self.lyric_labels):
             data_index = start_data_index + i
             
-            # Il testo visualizzato è una porzione (finestra) dei dati lyrics
             if 0 <= data_index < lyrics_count:
                  text = self.lyrics_data[data_index]["line"]
             else:
@@ -529,10 +472,8 @@ class LyricsPlayerWindow(QDialog):
             self.reapply_side_font(label, abs(i - self.center_line_index))
         
     def closeEvent(self, event):
-        """Intercetta la chiusura per fermare il timer e nascondere la finestra (la finestra è persistente)."""
+        """Intercetta la chiusura per fermare il timer (essendo un QWidget, la chiusura è gestita dal tab)."""
         if self.timer.isActive():
             self.timer.stop()
         
-        # Nasconde la finestra anziché distruggerla
-        self.hide()
-        event.ignore()
+        super().closeEvent(event)

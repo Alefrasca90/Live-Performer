@@ -7,8 +7,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QMimeData, QTimer, QPoint 
 from PyQt6.QtGui import QMouseEvent
 # Import adattato
-from ui.views.lyrics_player_window import LyricsPlayerWindow 
-from core.data_manager import DataManager # AGGIORNATO: Importa l'unico gestore
+from ui.views.lyrics_player_window import LyricsPlayerWidget # RIFATTORIZZATO A WIDGET
+from core.data_manager import DataManager
 
 class PlaylistListWidget(QListWidget):
     """QListWidget customizzato per accettare il drag and drop di nomi di canzoni e riordinare."""
@@ -57,7 +57,7 @@ class PlaylistEditorWidget(QWidget):
     
     PLAYLIST_SYNC_INTERVAL_MS = 200
     
-    def __init__(self, playlist_name, audio_engine, midi_engine, data_manager, settings_manager, parent=None):
+    def __init__(self, playlist_name, audio_engine, midi_engine, data_manager, settings_manager, lyrics_player_widget: LyricsPlayerWidget | None = None, parent=None):
         super().__init__(parent)
         self.playlist_name = playlist_name
         self.audio_engine = audio_engine
@@ -73,12 +73,13 @@ class PlaylistEditorWidget(QWidget):
         
         self.song_name: str | None = None
         
-        self.lyrics_player: LyricsPlayerWindow | None = None
+        # Usa il widget iniettato
+        self.lyrics_player: LyricsPlayerWidget | None = lyrics_player_widget
         
         self.init_ui()
         self.load_playlist_songs()
         
-        QTimer.singleShot(100, self.open_lyrics_prompter_on_init) 
+        # Rimosso open_lyrics_prompter_on_init 
         
         self.playback_timer = QTimer(self)
         self.playback_timer.timeout.connect(self.update_playback_state)
@@ -229,7 +230,6 @@ class PlaylistEditorWidget(QWidget):
         is_resuming = (self.audio_engine.playing_song == song_name and self.audio_engine.pause_time > 0.0 and start_time_s == 0.0)
 
         if not is_resuming:
-            # Importa i motori per il type hint, non per l'istanza.
             
             self.stop_playback(reset_state=False) 
 
@@ -239,7 +239,7 @@ class PlaylistEditorWidget(QWidget):
                 QMessageBox.warning(self, "Errore", f"Brano '{song_name}' non ha tracce audio valide.")
                 self.song_name = None
                 
-                if self.lyrics_player and self.lyrics_player.isVisible():
+                if self.lyrics_player:
                      self.lyrics_player.set_lyrics_data([], f"Errore: {song_name}")
                 
                 return False
@@ -257,10 +257,8 @@ class PlaylistEditorWidget(QWidget):
             
             lyrics_data, _ = self.data_manager.get_lyrics_with_txt(song_name)
             
-            if self.lyrics_player is None:
-                self.open_lyrics_prompter(force_show=True) 
-            
-            self.lyrics_player.set_lyrics_data(lyrics_data, song_name)
+            if self.lyrics_player:
+                 self.lyrics_player.set_lyrics_data(lyrics_data, song_name)
             
         bpm = audio_tracks[0].get('bpm', 120.0) if audio_tracks else 120.0
 
@@ -355,7 +353,7 @@ class PlaylistEditorWidget(QWidget):
             self.current_song_index = -1
             self.song_name = None
         
-        if self.lyrics_player and self.lyrics_player.isVisible():
+        if self.lyrics_player:
             self.lyrics_player.set_lyrics_data([], "Riproduzione Ferma")
         
         if hasattr(self, 'progress_slider'):
@@ -447,7 +445,6 @@ class PlaylistEditorWidget(QWidget):
 
     # --- FUNZIONE LYRICS PROMPTER ---
     def open_lyrics_prompter(self, force_show=False, force_song_name=None):
-        from ui.views.lyrics_player_window import LyricsPlayerWindow
         
         song_name_to_prompt = self.audio_engine.playing_song
         
@@ -468,25 +465,16 @@ class PlaylistEditorWidget(QWidget):
              has_lyrics = bool(lyrics_data)
         
         if not has_lyrics and song_name_to_prompt != "Nessun brano selezionato":
-             if not force_show: 
-                 QMessageBox.warning(self, "Attenzione", f"Il brano '{song_name_to_prompt}' non ha lyrics sincronizzati.")
-                 return
-             lyrics_data = [] 
-
-        if self.lyrics_player is None:
-            self.lyrics_player = LyricsPlayerWindow(
-                audio_engine=self.audio_engine, 
-                midi_engine=self.midi_engine,
-                settings_manager=self.settings_manager,
-                parent=self
-            )
+             QMessageBox.warning(self, "Attenzione", f"Il brano '{song_name_to_prompt}' non ha lyrics sincronizzati.")
+             return
+        
+        if self.lyrics_player:
+            self.lyrics_player.set_lyrics_data(lyrics_data, song_name_to_prompt)
             
-        self.lyrics_player.set_lyrics_data(lyrics_data, song_name_to_prompt)
-        
-        if not self.lyrics_player.isVisible() or force_show:
-             self.lyrics_player.show()
-        
-        self.update_playback_buttons()
+            if self.parent() and hasattr(self.parent(), 'tab_widget'):
+                tab_index = self.parent().tab_widget.indexOf(self.lyrics_player)
+                if tab_index != -1:
+                     self.parent().tab_widget.setCurrentIndex(tab_index)
 
 
     # --- GESTIONE SLIDER (SEEK) ---
@@ -524,6 +512,5 @@ class PlaylistEditorWidget(QWidget):
          
     def closeEvent(self, event):
          self.stop_playback()
-         if self.lyrics_player:
-              self.lyrics_player.close() 
+         # Non chiudiamo più il player qui, è gestito dal MainWindow/Tab
          event.accept()

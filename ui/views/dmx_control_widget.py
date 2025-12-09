@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QSpacerItem, QSizePolicy, QLineEdit, QListWidget, QCheckBox, QScrollArea, QSlider
 )
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QAction # Import QAction per la compatibilità dei segnali
+from PyQt6.QtGui import QAction 
 
 # Import dei componenti Core del Progetto (DMX)
 from core.dmx_models import FixtureModello, IstanzaFixture, Scena, PassoChaser, Chaser 
@@ -16,12 +16,13 @@ from core.data_manager import DataManager
 from core.dmx_comm import DMXController 
 from core.project_models import Progetto, UniversoStato, MidiMapping
 from core.midi_comm import MIDIController 
-from ui.components.settings_manager import SettingsManager # Nuovo
-from ui.components.settings_dialog import SettingsDialog # Nuovo
+from ui.components.settings_manager import SettingsManager 
+from ui.components.settings_dialog import SettingsDialog 
 
 # Import dei componenti UI (DMX) dalla cartella components/
 from ui.components.fixture_editor import FixtureEditorDialog 
-from ui.views.stage_view import StageViewDialog # StageView è una view a sé
+from ui.views.stage_view import StageViewWidget # Importato il widget rifattorizzato
+from ui.views.stage_view import DraggableLightWidget # Importato DraggableLightWidget
 from ui.components.add_fixture_dialog import AddFixtureDialog 
 from ui.components.chaser_editor_dialog import ChaserEditorDialog 
 from ui.components.midi_mapping_dialog import MidiMappingDialog
@@ -34,7 +35,6 @@ from ui.mixins.fixture_control_mixin import FixtureControlMixin
 from ui.mixins.scene_chaser_mixin import SceneChaserMixin 
 from ui.mixins.midi_control_mixin import MIDIControlMixin 
 
-# La classe DMXControlWidget ora eredita da QWidget e tutti i Mixins
 class DMXControlWidget(QWidget, 
                      ProjectAndViewMixin, 
                      DMXCommunicationMixin, 
@@ -42,11 +42,11 @@ class DMXControlWidget(QWidget,
                      SceneChaserMixin,
                      MIDIControlMixin):
     
-    # ACCETTA I CORE OBJECTS COME PARAMETRI
-    def __init__(self, audio_engine, midi_engine, settings_manager, parent=None):
+    # MODIFIED CONSTRUCTOR: Accepts the injected stage_view
+    def __init__(self, audio_engine, midi_engine, settings_manager, stage_view: StageViewWidget, parent=None):
         super().__init__(parent)
         
-        # Assegna i motori condivisi (necessari per i Mixin e le finestre di dialogo)
+        # Assegna i motori condivisi
         self.audio_engine = audio_engine 
         self.midi_engine = midi_engine 
         self.settings_manager = settings_manager 
@@ -78,8 +78,8 @@ class DMXControlWidget(QWidget,
         self.dmx_comm = DMXController(port_name=dmx_port) 
         self.dmx_comm.connect() 
         
-        # 4. Stage View
-        self.stage_view: StageViewDialog | None = None
+        # 4. Stage View: Assign the injected widget
+        self.stage_view: StageViewWidget = stage_view
         
         # 5. Timer e Scene
         self.chaser_attivo: Chaser | None = None
@@ -102,9 +102,17 @@ class DMXControlWidget(QWidget,
         self._setup_ui_layout()
         
         # 9. Final Setup
-        self._ricostruisci_scene_chasers(
-            next((u for u in self.progetto.universi_stato if u.id_universo == self.universo_attivo.id_universo), Progetto.crea_vuoto().universi_stato[0])
-        ) 
+        u_stato = next((u for u in self.progetto.universi_stato if u.id_universo == self.universo_attivo.id_universo), Progetto.crea_vuoto().universi_stato[0])
+        
+        # Initialize Stage View content
+        self.stage_view.clear_and_repopulate(u_stato.istanze_stato) 
+        
+        # Connect signals from the injected Stage View after populating
+        for light_widget in self.stage_view.light_widgets.values():
+             light_widget.moved.connect(self._update_fixture_position)
+
+
+        self._ricostruisci_scene_chasers(u_stato) 
         self.popola_controlli_fader()
         self.dmx_comm.send_dmx_packet(self.universo_attivo.array_canali)
 
@@ -133,47 +141,16 @@ class DMXControlWidget(QWidget,
         if self.stage_view:
             self.stage_view.close()
             
-    # Metodi ausiliari di UI/Logica per il Mixin (alcuni sono ereditati, altri delegati)
-    def _midi_message_router(self, msg):
-        """Reindirizza il messaggio MIDI al logger e al gestore di mappatura (dal Mixin)."""
-        self._log_midi_message(msg)
-        self._handle_midi_message(msg) 
-
-    # Implementazioni dei dialoghi ausiliari (DELEGATE AI METODI DEI MIXIN O LOCALI)
+    # Redundant method called by Menu Bar. We implement logic to activate the tab.
     def _open_stage_view(self):
-        self._open_stage_view_impl()
-
-    def _open_fixture_editor(self):
-        self._open_fixture_editor_impl()
-
-    def _open_midi_mapping_dialog(self):
-        self._open_midi_mapping_dialog_impl()
-
-    def _open_add_fixture_dialog(self):
-        from ui.components.add_fixture_dialog import AddFixtureDialog 
-        dialog = AddFixtureDialog(self, fixture_modelli=self.fixture_modelli)
-        dialog.fixture_selected.connect(self._handle_fixture_add_request)
-        dialog.exec()
-        
-    def _open_chaser_editor_dialog(self):
-        from ui.components.chaser_editor_dialog import ChaserEditorDialog 
-        selected_chaser = None
-        if hasattr(self, 'chaser_list_widget'):
-            selected_items = self.chaser_list_widget.selectedItems()
-            if selected_items:
-                if hasattr(self, 'chaser_list'):
-                    index = self.chaser_list_widget.row(selected_items[0])
-                    if 0 <= index < len(self.chaser_list):
-                        selected_chaser = self.chaser_list[index]
-             
-        dialog = ChaserEditorDialog(
-            parent=self, 
-            scene_list=self.scene_list if hasattr(self, 'scene_list') else [], 
-            chaser_to_edit=selected_chaser
-        )
-        
-        dialog.chaser_saved.connect(self._handle_chaser_saved)
-        dialog.exec()
+        """Metodo chiamato dal menu bar per attivare il tab 'Stage'."""
+        if self.parent() and hasattr(self.parent(), 'tab_widget'):
+            # Trova l'indice del tab che contiene l'istanza di StageViewWidget
+            tab_index = self.parent().tab_widget.indexOf(self.stage_view)
+            if tab_index != -1:
+                 self.parent().tab_widget.setCurrentIndex(tab_index)
+        # We must keep the method signature because the Menu Bar calls it.
+        pass
 
     # --- UI DMX: Implementazione del Pannello di Controllo ---
     def _crea_pannello_controllo(self):
@@ -296,7 +273,7 @@ class DMXControlWidget(QWidget,
 
     # Metodi esposti a main.py dalla barra dei menu (delegati al Mixin):
     def salva_progetto_a_file(self):
-        self._salva_stato_progetto() # Chiamato dal Mixin
+        self._salva_stato_progetto()
         super().salva_progetto_a_file()
         
     def carica_progetto_da_file(self):
@@ -319,3 +296,13 @@ class DMXControlWidget(QWidget,
     
     def _handle_dmx_connection(self):
          super()._handle_dmx_connection()
+         
+    def _midi_message_router(self, msg):
+        self._log_midi_message(msg)
+        self._handle_midi_message(msg) 
+        
+    def _open_add_fixture_dialog(self):
+        super()._open_add_fixture_dialog()
+        
+    def _open_chaser_editor_dialog(self):
+        super()._open_chaser_editor_dialog()
