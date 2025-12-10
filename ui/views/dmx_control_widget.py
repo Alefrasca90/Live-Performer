@@ -21,8 +21,8 @@ from ui.components.settings_dialog import SettingsDialog
 
 # Import dei componenti UI (DMX) dalla cartella components/
 from ui.components.fixture_editor import FixtureEditorDialog 
-from ui.views.stage_view import StageViewWidget # Importato il widget rifattorizzato
-from ui.views.stage_view import DraggableLightWidget # Importato DraggableLightWidget
+from ui.views.stage_view import StageViewWidget 
+from ui.views.stage_view import DraggableLightWidget 
 from ui.components.add_fixture_dialog import AddFixtureDialog 
 from ui.components.chaser_editor_dialog import ChaserEditorDialog 
 from ui.components.midi_mapping_dialog import MidiMappingDialog
@@ -74,6 +74,10 @@ class DMXControlWidget(QWidget,
         # [NUOVO] 2b. Inizializzazione dello stato Master Dimmer
         # Questo valore verrà letto e scritto dal FixtureControlMixin
         self.master_dimmer_value = 255 
+
+        # [NUOVO] 2c. Inizializzazione della cache Active Scenes (per SceneChaserMixin)
+        self.active_scenes = [] # Verrà popolato da SceneChaserMixin._ricostruisci_scene_chasers
+
 
         # 3. DMX Controller
         current_u_state = next((u for u in self.progetto.universi_stato if u.id_universo == self.universo_attivo.id_universo), Progetto.crea_vuoto().universi_stato[0])
@@ -231,8 +235,12 @@ class DMXControlWidget(QWidget,
         widget = QWidget()
         col_layout = QVBoxLayout(widget)
 
-        # 2a. Gestione Scene 
-        scene_group = QGroupBox("Gestione Scene")
+        # 1. NUOVO: Gestione Scene Attive (Programmer)
+        active_scenes_group = self._build_active_scenes_control()
+        col_layout.addWidget(active_scenes_group, 2) 
+
+        # 2. Gestione Scene (Archivio)
+        scene_group = QGroupBox("Archivio Scene")
         scene_layout = QVBoxLayout(scene_group)
         
         capture_layout = QHBoxLayout()
@@ -245,7 +253,7 @@ class DMXControlWidget(QWidget,
         scene_layout.addWidget(QLabel("Cattura Scena Corrente:"))
         scene_layout.addLayout(capture_layout)
         
-        scene_layout.addWidget(QLabel("\nScene Salvate (Doppio Click per Applicare):"))
+        scene_layout.addWidget(QLabel("\nScene Salvate (Doppio Click per Aggiungere):"))
         self.scene_list_widget = QListWidget() 
         self.scene_list_widget.doubleClicked.connect(self._applica_scena_selezionata) 
         scene_layout.addWidget(self.scene_list_widget, 1) # Stretch 1 for QListWidget
@@ -259,7 +267,7 @@ class DMXControlWidget(QWidget,
         
         col_layout.addWidget(scene_group, 2) # Groupbox ha stretch factor 2
 
-        # 2b. Gestione Sequenze (Chaser) 
+        # 3. Gestione Sequenze (Chaser) 
         chaser_group = QGroupBox("Gestione Sequenze (Chaser)")
         chaser_layout = QVBoxLayout(chaser_group)
         

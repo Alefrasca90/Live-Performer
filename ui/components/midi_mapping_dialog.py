@@ -37,7 +37,7 @@ class MidiMappingDialog(QDialog):
 
     def _setup_ui(self):
         main_layout = QVBoxLayout(self)
-        self.resize(1000, 500) # Dimensione aumentata per la nuova colonna
+        self.resize(1100, 500) # Dimensione aumentata per la nuova colonna
 
         # --- Sezione Impostazioni MIDI ---
         settings_group = QGroupBox("Impostazioni Controller")
@@ -68,14 +68,15 @@ class MidiMappingDialog(QDialog):
         
         # 1. Tabella di Mappatura
         self.table = QTableWidget()
-        self.table.setColumnCount(6) # MODIFICATO: da 5 a 6 colonne
+        self.table.setColumnCount(7) # MODIFICATO: da 6 a 7 colonne
         self.table.setHorizontalHeaderLabels([
             "Tipo MIDI", 
             "Numero (Nota/CC/PC#)", 
             "Valore Min/Soglia", 
             "Azione", 
             "Target (Scena/Chaser)",
-            "Solo DMX Interno" # NUOVO NOME COLONNA
+            "DMX Addr (Fader)", # NUOVA COLONNA
+            "Solo DMX Interno" 
         ])
         
         # Imposta le colonne per le dimensioni
@@ -85,6 +86,7 @@ class MidiMappingDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents) # NUOVA COLONNA
+        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents) # NUOVA COLONNA
         
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         main_layout.addWidget(self.table)
@@ -138,8 +140,8 @@ class MidiMappingDialog(QDialog):
 
         # Colonna 3: Azione (ComboBox)
         combo_action = QComboBox()
-        # MODIFICATO: Aggiunta l'azione 'master_dimmer'
-        combo_action.addItems(['stop', 'scene', 'chaser', 'master_dimmer'])
+        # MODIFICATO: Aggiunta l'azione 'fader'
+        combo_action.addItems(['stop', 'scene', 'chaser', 'master_dimmer', 'fader'])
         self.table.setCellWidget(row, 3, combo_action)
         
         # Colonna 4: Target (ComboBox)
@@ -158,13 +160,29 @@ class MidiMappingDialog(QDialog):
         combo_target.addItems(target_options)
         self.table.setCellWidget(row, 4, combo_target)
         
-        # Colonna 5: Solo DMX Interno (Checkbox)
+        # Colonna 5: DMX Address (SpinBox 1-512) - PER FADER
+        dmx_addr_spin = QSpinBox()
+        dmx_addr_spin.setRange(1, 512)
+        # L'accesso all'attributo deve essere sicuro in caso di mapping vecchio
+        fader_dmx_addr = getattr(mapping, 'fader_dmx_address', 1) if mapping else 1
+        if fader_dmx_addr is not None:
+            try:
+                dmx_addr_spin.setValue(int(fader_dmx_addr))
+            except (TypeError, ValueError):
+                dmx_addr_spin.setValue(1)
+        else:
+            dmx_addr_spin.setValue(1)
+        dmx_addr_spin.setToolTip("Indirizzo DMX del canale (1-512) controllato da MIDI CC/Note. Usato solo con Azione 'Fader'.")
+        self.table.setCellWidget(row, 5, dmx_addr_spin) # NUOVA COLONNA
+        
+        # Colonna 6: Solo DMX Interno (Checkbox)
         chk_internal = QCheckBox()
         # Verifichiamo l'esistenza dell'attributo per compatibilità con dati vecchi
         if mapping and hasattr(mapping, 'internal_only'): 
              chk_internal.setChecked(mapping.internal_only)
-        self.table.setCellWidget(row, 5, chk_internal)
+        self.table.setCellWidget(row, 6, chk_internal) # NUOVA COLONNA
         
+        # Carica i valori esistenti
         if mapping:
             combo_type.setCurrentText(mapping.midi_type)
             spin_number.setValue(mapping.midi_number)
@@ -173,10 +191,11 @@ class MidiMappingDialog(QDialog):
             
             # Cerca il target corretto
             if mapping.action_type == 'stop':
-                 combo_target.setCurrentIndex(0) # Deve essere "-"
-            # MODIFICATO: Gestisce il caricamento del Master Dimmer
+                 combo_target.setCurrentIndex(0) 
             elif mapping.action_type == 'master_dimmer':
                  combo_target.setCurrentText("Master Dimmer")
+            elif mapping.action_type == 'fader': # Azione FADER: Target non significativo, ma Target COMBO può essere "-"
+                 dmx_addr_spin.setValue(mapping.fader_dmx_address)
             elif mapping.action_type == 'scene':
                  try:
                     target_name = self.scene_list[mapping.action_index].nome
@@ -222,7 +241,8 @@ class MidiMappingDialog(QDialog):
                 spin_value = self.table.cellWidget(row, 2)
                 combo_action = self.table.cellWidget(row, 3)
                 combo_target = self.table.cellWidget(row, 4)
-                chk_internal = self.table.cellWidget(row, 5) 
+                dmx_addr_spin = self.table.cellWidget(row, 5) # NUOVO
+                chk_internal = self.table.cellWidget(row, 6) # MODIFICATO: indice 6
 
                 # Estrazione dei valori
                 midi_type = combo_type.currentText()
@@ -230,6 +250,7 @@ class MidiMappingDialog(QDialog):
                 value = spin_value.value()
                 action_type = combo_action.currentText()
                 target_text = combo_target.currentText()
+                fader_dmx_address = dmx_addr_spin.value() # NUOVO
                 
                 internal_only = chk_internal.isChecked() if chk_internal else False 
 
@@ -253,7 +274,7 @@ class MidiMappingDialog(QDialog):
                              return
                         action_index = chaser_names.index(target_name)
                 
-                # NUOVO: Validazione Master Dimmer
+                # Validazione Master Dimmer
                 elif action_type == 'master_dimmer':
                     if target_text != "Master Dimmer":
                          QMessageBox.warning(self, "Errore Mappatura", f"L'Azione 'Master Dimmer' deve avere Target 'Master Dimmer' (Passo {row+1}).")
@@ -262,6 +283,16 @@ class MidiMappingDialog(QDialog):
                         QMessageBox.warning(self, "Errore Mappatura", f"L'Azione 'Master Dimmer' deve usare Tipo MIDI 'cc' o 'note' per il controllo fader (Passo {row+1}).")
                         return
                     action_index = -2 # Indice fittizio per Master Dimmer
+                    
+                # NUOVO: Validazione Fader per Canale
+                elif action_type == 'fader':
+                     if midi_type != 'cc' and midi_type != 'note':
+                        QMessageBox.warning(self, "Errore Mappatura", f"L'Azione 'Fader' deve usare Tipo MIDI 'cc' o 'note' (Passo {row+1}).")
+                        return
+                     if not (1 <= fader_dmx_address <= 512):
+                         QMessageBox.warning(self, "Errore Mappatura", f"L'Azione 'Fader' deve avere un DMX Address valido (1-512) (Passo {row+1}).")
+                         return
+                     action_index = -3 # Indice fittizio per Fader
                     
                 # Validazione Stop
                 elif action_type == 'stop':
@@ -276,6 +307,7 @@ class MidiMappingDialog(QDialog):
                     value=value, 
                     action_type=action_type, 
                     action_index=action_index,
+                    fader_dmx_address=fader_dmx_address, # AGGIUNTO
                     internal_only=internal_only 
                 ))
 

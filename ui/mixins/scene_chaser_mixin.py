@@ -1,11 +1,14 @@
-# ui/mixins/scene_chaser_mixin.py (COMPLETO E AGGIORNATO per gestione MIDI)
+# ui/mixins/scene_chaser_mixin.py (COMPLETO E AGGIORNATO per gestione MIDI e Scene Multiple)
 
 from PyQt6.QtWidgets import QMessageBox 
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QTimer, Qt
 from core.dmx_models import Scena, PassoChaser, Chaser
 from core.project_models import UniversoStato
 import time 
-import threading # NUOVO: Import per il threading
+import threading 
+from core.dmx_models import ActiveScene 
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QGroupBox, QPushButton 
+
 
 # Frequenza del timer di fade (in Hz)
 FADE_RATE_HZ = 100 
@@ -16,6 +19,9 @@ class SceneChaserMixin:
     # Variabili di stato per il Fading
     _FADE_DATA = {} 
     _FADE_TICK_MS = 1000 / FADE_RATE_HZ
+    
+    # [NUOVO] Lista di ActiveScene
+    active_scenes: list[ActiveScene] = []
 
     def _ricostruisci_scene_chasers(self, u_stato: UniversoStato):
         """Carica le scene e chaser per l'universo attivo."""
@@ -23,37 +29,41 @@ class SceneChaserMixin:
         self.chaser_list: list[Chaser] = u_stato.chasers 
         self.chaser_attivo: Chaser | None = None
         
+        # [NUOVO] Ricostruisci ActiveScene dalla serializzazione
+        self.active_scenes = self._rebuild_active_scenes(u_stato.active_scenes_data)
+        
         if hasattr(self, 'scene_list_widget'):
             self._update_scene_list_ui()
         if hasattr(self, 'chaser_list_widget'): 
             self._update_chaser_list_ui()
+        if hasattr(self, 'active_scenes_layout'):
+             self._update_active_scenes_ui()
+             
+    def _rebuild_active_scenes(self, active_scenes_data: list[dict]) -> list[ActiveScene]:
+        """Ricostruisce gli oggetti ActiveScene dai dati serializzati. [NUOVO]"""
+        rebuilt_scenes = []
+        scene_map = {s.nome: s for s in self.scene_list}
+        
+        for data in active_scenes_data:
+            scena_nome = data.get('scena_nome')
+            master_value = data.get('master_value', 255)
+            scena = scene_map.get(scena_nome)
+            if scena:
+                rebuilt_scenes.append(ActiveScene(scena, master_value))
+                
+        return rebuilt_scenes
 
     # --- Metodi Pubblici per MIDI/Helper ---
 
     def apply_scene_by_index(self, index: int):
-        """Applica una scena in base all'indice (0-based) dalla lista salvata."""
+        """Aggiunge una scena alla lista attiva in base all'indice (0-based) dalla lista salvata. [MODIFICATO]"""
         if 0 <= index < len(self.scene_list):
             scena_da_applicare = self.scene_list[index]
-            
-            # 1. Stop Chaser/Fade Attivo
-            if self.chaser_timer.isActive() or self.fade_timer.isActive():
-                self._ferma_chaser(show_message=False) 
-                
-            # 2. Applica la scena (non dimmata)
-            self.universo_attivo.applica_scena(scena_da_applicare)
-            
-            # 3. [NUOVO] Applica il Master Dimmer
-            if hasattr(self, '_apply_master_dimmer_to_array_only'): # Assicura che il mixin FixtureControlMixin sia presente
-                 self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
-
-            # 4. [MODIFICATO - THREADING] Invia DMX in un thread separato
-            dmx_data_copy = self.universo_attivo.array_canali[:]
-            threading.Thread(target=self.dmx_comm.send_dmx_packet, args=(dmx_data_copy,)).start()
-            
-            # 5. Aggiorna UI (legge i valori dimmati)
-            self._aggiorna_ui_fader_e_stage()
+            self._add_scene_to_active(scena_da_applicare, master_value=255) # L'applicazione da MIDI è Master 255
+            self.setWindowTitle(f"DMX Controller - Scena MIDI: {scena_da_applicare.nome}")
         else:
              print(f"MIDI Error: Indice scena {index} fuori limite.")
+
 
     def start_chaser_by_index(self, index: int):
         """Avvia un chaser in base all'indice (0-based) dalla lista salvata."""
@@ -77,10 +87,110 @@ class SceneChaserMixin:
             # Riavvia il chaser dal primo passo (next_passo lo farà ciclare)
             self.chaser_attivo.indice_corrente = len(self.chaser_attivo.passi) - 1 
             self._esegui_passo_chaser() 
-            self.setWindowTitle(f"DMX Controller - CHASER ATTIVO MIDI: {self.chaser_attivo.nome}")
+            self.setWindowTitle(f"DMX Controller - CHASER ATTIVO MIDI: {chaser_to_start.nome}")
             self._update_chaser_list_ui()
         else:
             print(f"MIDI Error: Indice chaser {index} fuori limite.")
+
+
+    # --- Scene Logic (HTP/MERGE) ---
+    
+    def _add_scene_to_active(self, scene: Scena, master_value: int = 255):
+        """Aggiunge una scena alla lista delle scene attive (se non è già presente). [NUOVO]"""
+        if self.chaser_attivo:
+            self._ferma_chaser(show_message=False)
+
+        # Controlla se la scena è già attiva
+        found = False
+        for active_scene in self.active_scenes:
+            if active_scene.scena.nome == scene.nome:
+                active_scene.master_value = master_value
+                found = True
+                break
+        
+        if not found:
+             self.active_scenes.append(ActiveScene(scene, master_value))
+             
+        self._update_active_scenes_ui()
+        self._merge_and_send_dmx()
+        
+    def _remove_active_scene(self, index: int):
+        """Rimuove una scena attiva e rifonde l'output DMX. [NUOVO]"""
+        if 0 <= index < len(self.active_scenes):
+            del self.active_scenes[index]
+            self._update_active_scenes_ui()
+            self._merge_and_send_dmx()
+            
+    def _update_active_scene_master(self, index: int, value: int):
+        """Aggiorna il valore master di una scena attiva e rifonde l'output DMX. [NUOVO]"""
+        if 0 <= index < len(self.active_scenes):
+            self.active_scenes[index].master_value = value
+            self._merge_and_send_dmx()
+            
+    def _merge_and_send_dmx(self):
+        """Metodo per chiamare la fusione HTP e inviare DMX. [NUOVO]"""
+        if hasattr(self, '_merge_active_scenes'): # Implementato in FixtureControlMixin
+             self._merge_active_scenes(self.active_scenes)
+             self._save_active_scenes()
+
+    def _save_active_scenes(self):
+        """Serializza le scene attive nello stato del progetto. [NUOVO]"""
+        u_stato = next((u for u in self.progetto.universi_stato if u.id_universo == self.universo_attivo.id_universo), None)
+        if u_stato:
+             u_stato.active_scenes_data = [{'scena_nome': s.scena.nome, 'master_value': s.master_value} for s in self.active_scenes]
+             self._salva_stato_progetto()
+
+
+    def _update_active_scenes_ui(self):
+        """Aggiorna la QListWidget e il layout delle scene attive. [NUOVO]"""
+        if not hasattr(self, 'active_scenes_layout'):
+            return
+            
+        # Pulisci il layout esistente
+        for i in reversed(range(self.active_scenes_layout.count())): 
+            item = self.active_scenes_layout.itemAt(i)
+            if item.widget():
+                 item.widget().deleteLater()
+            elif item.layout():
+                 # Pulisci il sub-layout
+                 sub_layout = item.layout()
+                 for j in reversed(range(sub_layout.count())):
+                      widget = sub_layout.itemAt(j).widget()
+                      if widget: widget.deleteLater()
+                 
+        if not self.active_scenes:
+            self.active_scenes_layout.addWidget(QLabel("Nessuna Scena Attiva"))
+            return
+
+        # Ricrea i widget per le scene attive
+        for idx, active_scene in enumerate(self.active_scenes):
+            scene_widget = QWidget()
+            h_layout = QHBoxLayout(scene_widget)
+            
+            # 1. Label e pulsante Rimuovi
+            label_text = f"{active_scene.scena.nome}"
+            label = QLabel(label_text)
+            
+            btn_remove = QPushButton("X")
+            btn_remove.setFixedSize(20, 20)
+            btn_remove.clicked.connect(lambda _, index=idx: self._remove_active_scene(index))
+            
+            h_layout.addWidget(label, 1)
+            h_layout.addWidget(btn_remove)
+
+            # 2. Slider Master
+            master_slider = QSlider(Qt.Orientation.Horizontal)
+            master_slider.setRange(0, 255)
+            master_slider.setValue(active_scene.master_value)
+            
+            # Connessione al metodo di aggiornamento
+            master_slider.valueChanged.connect(lambda val, index=idx: self._update_active_scene_master(index, val))
+            
+            v_layout = QVBoxLayout()
+            v_layout.addWidget(scene_widget)
+            v_layout.addWidget(master_slider)
+            
+            self.active_scenes_layout.addLayout(v_layout)
 
 
     # --- Scene Logic ---
@@ -112,7 +222,7 @@ class SceneChaserMixin:
             self.scene_list_widget.addItem(f"{s.nome} ({len(s.valori_canali)}ch)")
 
     def _applica_scena_selezionata(self):
-        """Applica la scena selezionata nel QListWidget."""
+        """Aggiunge la scena selezionata nel QListWidget alla lista delle scene attive. [MODIFICATO]"""
         if not hasattr(self, 'scene_list_widget'):
             return
             
@@ -123,25 +233,10 @@ class SceneChaserMixin:
         index = self.scene_list_widget.row(selected_items[0])
         scena_da_applicare = self.scene_list[index]
         
-        # 1. STOP CHASER (Synchronous, but harmless)
-        if self.chaser_timer.isActive() or self.fade_timer.isActive():
-            self._ferma_chaser(show_message=False) 
-            
-        # 2. APPLY SCENE (NON dimmata)
-        self.universo_attivo.applica_scena(scena_da_applicare)
+        self._add_scene_to_active(scena_da_applicare, master_value=255)
         
-        # 3. [NUOVO] Applica il Master Dimmer
-        if hasattr(self, '_apply_master_dimmer_to_array_only'):
-             self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
-
-        # 4. [MODIFICATO - THREADING] Invia DMX in un thread separato
-        dmx_data_copy = self.universo_attivo.array_canali[:]
-        threading.Thread(target=self.dmx_comm.send_dmx_packet, args=(dmx_data_copy,)).start()
-
-        # 5. UI UPDATES
-        # Nota: Eseguiamo l'aggiornamento UI in modo sincrono per evitare race condition con il fader Master Dimmer (CC).
-        self._aggiorna_ui_fader_e_stage()
-        QTimer.singleShot(10, lambda: QMessageBox.information(self, "Scena Applicata", f"Scena '{scena_da_applicare.nome}' applicata."))
+        # L'aggiornamento UI e DMX è gestito da _add_scene_to_active (via _merge_and_send_dmx)
+        QTimer.singleShot(10, lambda: QMessageBox.information(self, "Scena Aggiunta", f"Scena '{scena_da_applicare.nome}' aggiunta al Programmer."))
 
         
     def _cancella_scena_selezionata(self):
@@ -252,14 +347,19 @@ class SceneChaserMixin:
         self._update_chaser_list_ui()
         
     def _ferma_chaser(self, show_message: bool = True):
-        """Ferma il chaser se in esecuzione."""
+        """Ferma il chaser se in esecuzione. [MODIFICATO]"""
         if self.chaser_timer.isActive():
             self.chaser_timer.stop()
         if self.fade_timer.isActive():
             self.fade_timer.stop()
         
         self._FADE_DATA.clear()
-
+        
+        # [NUOVO] Se il chaser viene fermato, rimuovi tutte le scene attive (se non provenienti dal fader manuale)
+        if self.chaser_attivo:
+            self.active_scenes.clear()
+            self._merge_and_send_dmx()
+        
         self.setWindowTitle(f"DMX Controller - Universo {self.universo_attivo.id_universo}")
         self.chaser_attivo = None 
         self._update_chaser_list_ui() 
@@ -293,7 +393,7 @@ class SceneChaserMixin:
                 
                 self.setWindowTitle(f"DMX Controller - CHASER ATTIVO: {self.chaser_attivo.nome} | Passo: {passo.scena.nome} (Fade In {passo.tempo_fade_in:.1f}s)")
                 
-                return # Si esce, il fade_timer gestirà l'aggiornamento DMX
+                return 
 
             else:
                 # 2. Nessun Fade In, applicazione istantanea (NON dimmata)
@@ -307,7 +407,7 @@ class SceneChaserMixin:
                 dmx_data_copy = self.universo_attivo.array_canali[:]
                 threading.Thread(target=self.dmx_comm.send_dmx_packet, args=(dmx_data_copy,)).start()
 
-                self._aggiorna_ui_fader_e_stage() # <--- Aggiorna UI, usa l'array dimmato
+                self._aggiorna_ui_fader_e_stage() 
 
                 # 5. Imposta Hold Time
                 tempo_totale_ms = int(passo.tempo_permanenza * 1000)
@@ -437,3 +537,22 @@ class SceneChaserMixin:
         if hasattr(self, 'aggiorna_simulazione_luce'):
             for instance in self.universo_attivo.fixture_assegnate:
                 self.aggiorna_simulazione_luce(instance)
+                
+    def _build_active_scenes_control(self):
+        """Costruisce il pannello per la gestione delle scene attive. [NUOVO]"""
+        scenes_group = QGroupBox("Scene Attive (Programmer)")
+        
+        # Layout per la lista dinamica
+        self.active_scenes_layout = QVBoxLayout() 
+        
+        # Wrapper per la lista dinamica (per lo scroll, se necessario, non implementato per semplicità)
+        wrapper = QWidget()
+        wrapper.setLayout(self.active_scenes_layout)
+        
+        main_layout = QVBoxLayout(scenes_group)
+        main_layout.addWidget(wrapper, 1)
+        
+        # Carica lo stato iniziale
+        self._update_active_scenes_ui()
+        
+        return scenes_group

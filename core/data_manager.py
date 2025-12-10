@@ -147,13 +147,15 @@ class DataManager:
                             'value': m.value,
                             'action_type': m.action_type,
                             'action_index': m.action_index,
-                            'internal_only': getattr(m, 'internal_only', False) # AGGIUNTO per salvare il nuovo flag
+                            'internal_only': getattr(m, 'internal_only', False),
+                            'fader_dmx_address': getattr(m, 'fader_dmx_address', None) # AGGIUNTO fader_dmx_address
                         }
                         for m in u_stato.midi_mappings
                     ],
                     'midi_channel': u_stato.midi_channel,
                     'midi_controller_port_name': u_stato.midi_controller_port_name,
-                    'dmx_port_name': u_stato.dmx_port_name
+                    'dmx_port_name': u_stato.dmx_port_name,
+                    'active_scenes': u_stato.active_scenes_data # AGGIUNTO active_scenes
                 }
                 for u_stato in progetto.universi_stato
             ]
@@ -224,7 +226,8 @@ class DataManager:
                     value=m_data.get('value', 0),
                     action_type=m_data.get('action_type', 'stop'),
                     action_index=m_data.get('action_index', -1),
-                    internal_only=m_data.get('internal_only', False) # AGGIUNTO per caricare il nuovo flag
+                    internal_only=m_data.get('internal_only', False),
+                    fader_dmx_address=m_data.get('fader_dmx_address', None) # AGGIUNTO fader_dmx_address
                 )
                 for m_data in u_data.get('midi_mappings', [])
             ]
@@ -238,7 +241,8 @@ class DataManager:
                 midi_mappings=midi_mappings_list,
                 midi_channel=u_data.get('midi_channel', 0),
                 midi_controller_port_name=u_data.get('midi_controller_port_name', ""),
-                dmx_port_name=u_data.get('dmx_port_name', "COM5")
+                dmx_port_name=u_data.get('dmx_port_name', "COM5"),
+                active_scenes=u_data.get('active_scenes', []) # AGGIUNTO active_scenes
             ))
             
         if not universi_stato:
@@ -375,7 +379,7 @@ class DataManager:
                 shutil.rmtree(song_media_dir)
                 print(f"Cartella media brano eliminata: {song_media_dir}")
             except Exception as e:
-                print(f"ATTENZIONE: Impossibile eliminare la cartella media del brano {name}: {e}")
+                print(f"ATTENZIONE: Errore durante l'eliminazione della cartella media del brano {name}: {e}")
                 
 
         self.audio_tracks.pop(name, None)

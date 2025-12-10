@@ -1,4 +1,4 @@
-# ui/mixins/midi_control_mixin.py (COMPLETO E AGGIORNATO per logica mappatura)
+# ui/mixins/midi_control_mixin.py (COMPLETO E AGGIORNATO per logica mappatura/Note OFF)
 
 from PyQt6.QtWidgets import QMessageBox
 from PyQt6.QtCore import Qt, QTimer
@@ -8,6 +8,9 @@ from core.project_models import MidiMapping
 
 class MIDIControlMixin:
     """Gestisce l'interfaccia e la logica per il controllo MIDI."""
+    
+    # [NUOVO] Dizionario per tracciare le azioni Scene/Chaser attivate e attive da MIDI (solo per Note)
+    _active_midi_actions = {} 
     
     def _load_midi_settings(self, new_port_name: str | None = None):
         """
@@ -44,7 +47,10 @@ class MIDIControlMixin:
         if not self.midi_mappings and self.universo_attivo and len(self.universo_attivo.fixture_assegnate) > 0:
              # Usiamo le liste di Scene/Chaser caricate in SceneChaserMixin (se esistono)
              if hasattr(self, 'scene_list') and self.scene_list:
-                 self.midi_mappings.append(MidiMapping(midi_type='note', midi_number=48, value=1, action_type='scene', action_index=0, internal_only=True)) # Note C3 -> Scena 1 (Aggiunto internal_only per default)
+                 # Note C3 -> Scena 1 (ON: value=1) [Aggiunto internal_only per default]
+                 self.midi_mappings.append(MidiMapping(midi_type='note', midi_number=48, value=1, action_type='scene', action_index=0, internal_only=True)) 
+                 # [NUOVO] Note C3 -> Rilascio Scena (OFF: value=0) [Aggiunto internal_only per default]
+                 self.midi_mappings.append(MidiMapping(midi_type='note', midi_number=48, value=0, action_type='scene', action_index=0, internal_only=True)) 
              if hasattr(self, 'chaser_list') and self.chaser_list:
                  self.midi_mappings.append(MidiMapping(midi_type='cc', midi_number=10, value=65, action_type='chaser', action_index=0, internal_only=True)) # CC 10 > 64 -> Chaser 1 (Aggiunto internal_only per default)
              self.midi_mappings.append(MidiMapping(midi_type='note', midi_number=60, value=1, action_type='stop', action_index=-1, internal_only=True)) # Note C4 -> Stop (Aggiunto internal_only per default)
@@ -74,23 +80,27 @@ class MIDIControlMixin:
         midi_number = None
         value = None
         
-        if midi_type == 'note_on':
-            # Solo se è Note ON (velocity > 0)
-            if msg.velocity > 0:
-                midi_number = msg.note
-                value = msg.velocity 
-            else:
-                # Ignora Note OFF (velocity = 0) in questa fase di estrazione
-                return 
+        if midi_type == 'note_on' or midi_type == 'note_off': 
+            # [MODIFICATO] Processa Note ON (velocity > 0) e Note OFF (velocity = 0)
+            midi_number = msg.note
+            value = msg.velocity 
+            
+            if midi_type == 'note_off' or (midi_type == 'note_on' and msg.velocity == 0):
+                 value = 0 # Tratta Note OFF (sia note_off che note_on con vel=0) come valore 0
+            
+            # Se la nota è ON, il valore è la velocity. Se è OFF, il valore è 0.
+            midi_type = 'note' # Normalizza il tipo per la mappatura
             
         elif midi_type == 'control_change':
             midi_number = msg.control
             value = msg.value
+            midi_type = 'cc'
             
         elif midi_type == 'program_change':
             # Program number è 0-indexed, mappiamo 1-indexed per PC# 1-128
             midi_number = msg.program + 1 
             value = -1 # Valore non usato per PC
+            midi_type = 'pc'
             
         else:
             return 
@@ -99,28 +109,31 @@ class MIDIControlMixin:
         for mapping in self.midi_mappings:
             is_match = False
             
+            # [NUOVO] Chiave univoca per l'azione MIDI per lo Stack
+            midi_key = (midi_type, midi_number)
+            
             # --- Regole di Match ---
             
             # Match tipo e numero
-            if mapping.midi_type == 'note' and midi_type == 'note_on' and midi_number == mapping.midi_number:
-                # Note: Match se la nota è corretta. Il valore/velocity è la soglia.
-                if value >= mapping.value:
+            if mapping.midi_type == 'note' and midi_type == 'note' and midi_number == mapping.midi_number:
+                # Note: Match se la nota è corretta. Per la logica ON/OFF, il valore DEVE essere esattamente il valore di soglia
+                if value == mapping.value:
                     is_match = True
                     
-            elif mapping.midi_type == 'cc' and midi_type == 'control_change' and midi_number == mapping.midi_number:
+            elif mapping.midi_type == 'cc' and midi_type == 'cc' and midi_number == mapping.midi_number:
                 # CC: Match solo se il valore ricevuto (value) è >= del valore di soglia impostato (mapping.value)
                 if value >= mapping.value:
                     is_match = True
                         
-            elif mapping.midi_type == 'pc' and midi_type == 'program_change' and midi_number == mapping.midi_number:
+            elif mapping.midi_type == 'pc' and midi_type == 'pc' and midi_number == mapping.midi_number:
                 # PC: Corrisponde se il numero è corretto
                 is_match = True
 
             # --- Esecuzione Azione ---
             if is_match:
                 
-                # [NUOVO] GESTIONE MASTER DIMMER
-                if mapping.action_type == 'master_dimmer':
+                # [NUOVO] GESTIONE MASTER DIMMER (Solo CC)
+                if mapping.action_type == 'master_dimmer' and midi_type == 'cc':
                      # Mappa il valore MIDI (0-127) a DMX (0-255)
                      dmx_value = int(value * (255 / 127))
                      
@@ -146,18 +159,44 @@ class MIDIControlMixin:
                 
                 if mapping.action_type == 'scene':
                     if 0 <= mapping.action_index < len(scene_list):
-                        # Usa la funzione per applicare per indice
-                        self.apply_scene_by_index(mapping.action_index)
-                        self.setWindowTitle(f"DMX Controller - Scena MIDI: {scene_list[mapping.action_index].nome}")
-                    
+                        
+                        # [NUOVO] LOGICA TOGGLE/ON/OFF PER SCENE TRAMITE NOTE
+                        if midi_type == 'note': 
+                            if value > 0:
+                                # ON: Applica scena e aggiungi allo stack
+                                self.apply_scene_by_index(mapping.action_index)
+                                self.setWindowTitle(f"DMX Controller - Scena MIDI: {scene_list[mapping.action_index].nome}")
+                                self._active_midi_actions[midi_key] = mapping # Salva l'azione attiva nello stack
+                            else:
+                                # OFF (value=0): Rimuovi dallo stack e applica Blackout se lo stack è vuoto
+                                if midi_key in self._active_midi_actions:
+                                     del self._active_midi_actions[midi_key]
+                                     if not self._active_midi_actions and scene_list:
+                                          # Applica la prima scena (indice 0, di solito Blackout)
+                                          self.apply_scene_by_index(0) 
+                                          self.setWindowTitle("DMX Controller - MIDI SCENA RILASCIATA: Blackout")
+                                     elif self._active_midi_actions and scene_list:
+                                         # Se c'è un'altra scena attiva, ri-applica l'ultima aggiunta (o una qualsiasi)
+                                         last_mapping = next(iter(self._active_midi_actions.values()))
+                                         self.apply_scene_by_index(last_mapping.action_index)
+                        
+                        else:
+                            # Comportamento normale (momentaneo per CC/PC)
+                            self.apply_scene_by_index(mapping.action_index)
+                            self.setWindowTitle(f"DMX Controller - Scena MIDI: {scene_list[mapping.action_index].nome}")
+
+
                 elif mapping.action_type == 'chaser':
                     if 0 <= mapping.action_index < len(chaser_list):
                         # Usa la funzione per avviare per indice
                         self.start_chaser_by_index(mapping.action_index)
                     
                 elif mapping.action_type == 'stop':
-                    self._ferma_chaser()
-                    self.setWindowTitle("DMX Controller - MIDI STOP")
+                    # Solo se il trigger è ON (Note ON, CC > threshold, PC)
+                    if midi_type == 'note' and value > 0 or midi_type == 'cc' and value >= mapping.value or midi_type == 'pc':
+                         self._ferma_chaser()
+                         self.setWindowTitle("DMX Controller - MIDI STOP")
+                         self._active_midi_actions.clear() # Svuota lo stack
                 
                 return # Termina dopo l'esecuzione
     

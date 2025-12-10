@@ -116,3 +116,12 @@ class Chaser:
 
     def __repr__(self):
         return f"Chaser(nome='{self.nome}', passi={len(self.passi)})"
+
+class ActiveScene:
+    """Rappresenta una Scena attiva con un livello Master (Submaster)."""
+    def __init__(self, scena: Scena, master_value: int = 255):
+        self.scena = scena
+        self.master_value = master_value
+        
+    def __repr__(self):
+        return f"ActiveScene(nome='{self.scena.nome}', master={self.master_value})"

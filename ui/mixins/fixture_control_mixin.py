@@ -3,13 +3,15 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QMessageBox, QSpinBox, QSizePolicy, QSlider, 
-    QSpacerItem, QPushButton, QGroupBox # AGGIUNTO QGroupBox per Master Dimmer
+    QSpacerItem, QPushButton, QGroupBox 
 )
 from PyQt6.QtCore import Qt, QTimer
-import threading # NUOVO: Import per il threading
+import threading 
 # Import Core Models
 from core.dmx_models import IstanzaFixture, FixtureModello
 from core.project_models import IstanzaFixtureStato 
+from core.dmx_models import ActiveScene 
+from core.dmx_models import CanaleDMX 
 
 # Import widget locale
 from ui.components.widgets import FixtureGroupBox 
@@ -39,6 +41,77 @@ class FixtureControlMixin:
                     # Non ci interessa il tipo, ma solo se è gestito da una fixture
                     dimmer_map[dmx_addr] = 'CONTROLLED'
         return dimmer_map
+
+    def _get_instance_and_channel_from_dmx_addr(self, dmx_addr: int) -> tuple[IstanzaFixture | None, int]:
+        """Trova l'istanza e l'indice del canale per un dato indirizzo DMX universale. [NUOVO]"""
+        if not 1 <= dmx_addr <= 512:
+            return None, -1
+            
+        for instance in self.universo_attivo.fixture_assegnate:
+            start_addr, end_addr = instance.get_indirizzi_universali()
+            if start_addr <= dmx_addr <= end_addr:
+                channel_index = dmx_addr - start_addr
+                return instance, channel_index
+        return None, -1
+
+    def _merge_active_scenes(self, active_scenes: list[ActiveScene]):
+        """
+        Fonde tutte le scene attive (utilizzando i loro master) e applica il risultato
+        alla proprietà `fixture.valori_correnti` (che è la sorgente per l'HTP finale). [NUOVO]
+        """
+        if not active_scenes:
+            # Se nessuna scena è attiva, l'utente sta lavorando esclusivamente con i fader manuali/midi.
+            return
+            
+        # 1. Calcola la matrice di fusione DMX (512 canali)
+        merged_values_raw = {} # {dmx_addr: valore HTP tra le scene}
+        
+        for active_scene in active_scenes:
+            scene_data = active_scene.scena.valori_canali
+            master_factor = active_scene.master_value / 255.0
+            
+            for dmx_addr, raw_value in scene_data.items():
+                # Applica il Master della scena
+                value_with_master = int(raw_value * master_factor)
+                
+                # Applica HTP tra le scene (e con i valori precedenti)
+                if dmx_addr not in merged_values_raw:
+                    merged_values_raw[dmx_addr] = value_with_master
+                else:
+                    merged_values_raw[dmx_addr] = max(merged_values_raw[dmx_addr], value_with_master)
+                    
+        # 2. Applica i valori fusi alle istanze fixture (HTP con Programmer Layer)
+        
+        for instance in self.universo_attivo.fixture_assegnate:
+            start_addr, end_addr = instance.get_indirizzi_universali()
+            
+            for i in range(instance.modello.numero_canali):
+                dmx_addr = start_addr + i
+                
+                # Valore dalla fusione delle scene
+                scene_value = merged_values_raw.get(dmx_addr, instance.modello.descrizione_canali[i].valore_default)
+
+                # Applica HTP tra Scene (merged) e Programmer (fader manuale / midi fader)
+                current_programmer_value = instance.valori_correnti[i]
+                
+                # HTP: Prende il massimo tra la fusione delle scene e il valore manuale (programmer)
+                new_val = max(scene_value, current_programmer_value)
+
+                # Il valore è un raw value che sarà soggetto all'HTP finale di UniversoDMX
+                instance.valori_correnti[i] = new_val
+
+
+        # 3. L'universo DMX applica l'HTP/LTP finale su array_canali (per HTP dimmer e LTP colore/gobo)
+        self.universo_attivo.aggiorna_canali_universali()
+
+        # 4. Applica il Master Dimmer globale (MDA)
+        self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
+        
+        # 5. Aggiorna UI e DMX
+        dmx_data_copy = self.universo_attivo.array_canali[:]
+        threading.Thread(target=self.dmx_comm.send_dmx_packet, args=(dmx_data_copy,)).start()
+
+        self._aggiorna_ui_fader_e_stage()
 
 
     def _apply_master_dimmer_to_array_only(self, dmx_array: list[int]) -> list[int]:
@@ -105,8 +178,11 @@ class FixtureControlMixin:
 
     def _gestisci_cambio_valore_master_dmx(self, value: int, label_widget: QLabel):
         """Gestisce la modifica del Master Dimmer da parte dell'utente."""
+        # 'self.chaser_timer' must exist, ensured in MainWindow.__init__
         if self.chaser_timer.isActive():
-            self._ferma_chaser(show_message=False)
+            self._ferma_chaser(show_message=False) # Non mostriamo il messaggio qui
+            
+            # Usiamo singleShot per non bloccare l'interfaccia 
             QTimer.singleShot(10, lambda: QMessageBox.information(self, "Controllo Manuale", "Chaser interrotto per controllo manuale."))
             
         # Aggiornamento immediato della UI (Label)
@@ -404,7 +480,8 @@ class FixtureControlMixin:
         label_widget.setText(f"DMX {dmx_address}. {canale_nome}: {valore}")
         
         # 1. Imposta il valore sul modello e aggiorna l'array universale (NON dimmato, ma con HTP/LTP)
-        self.universo_attivo.set_valore_fixture(fixture_instance, indice_canale, valore)
+        fixture_instance.set_valore_canale(indice_canale, valore)
+        self.universo_attivo.aggiorna_canali_universali()
         
         # 2. Applica il Master Dimmer (MDA)
         self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
@@ -422,6 +499,8 @@ class FixtureControlMixin:
         
         Nota: i valori in instance.valori_correnti sono i valori DMX finali (già scalati dall'MDA).
         """
+        import numpy as np
+        
         valori = instance.valori_correnti
         
         # Accumulatori in virgola mobile (0.0 - 255.0 * N_CANALI)

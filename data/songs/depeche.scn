@@ -11,7 +11,7 @@
   ],
   "midi_tracks": [
     {
-      "file": "C:/Users/Alessandro/Music/midi test with CC.mid",
+      "file": "C:/Users/Alessandro/Music/New MIDI File.mid",
       "channel": 1,
       "port": "INTERNAL_DMX_PORT_TRIGGER"
     }
