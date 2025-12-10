@@ -1,6 +1,6 @@
 # core/dmx_universe.py
 
-from .dmx_models import IstanzaFixture, Scena # <-- Import Scena
+from .dmx_models import IstanzaFixture, Scena, CanaleDMX # <-- Import CanaleDMX
 
 class UniversoDMX:
     def __init__(self, id_universo: int = 1):
@@ -71,19 +71,44 @@ class UniversoDMX:
 
     def aggiorna_canali_universali(self):
         """
-        Popola l'array_canali (i 512 byte grezzi) prendendo i dati 
-        dalle fixture assegnate. 
+        Popola l'array_canali (i 512 byte grezzi) applicando la logica
+        di HTP (Highest Takes Precedence) per i canali Dimmer e
+        LTP (Latest Takes Precedence) per gli altri canali.
         """
-        self.array_canali = [0] * 512
         
+        # Inizializza l'array DMX finale con tutti a zero.
+        final_array = [0] * 512
+        dmx_channel_types = {} # {dmx_addr: 'HTP'/'LTP'}
+        
+        # Primo passaggio: Popolare i tipi di canale
         for fixture in self.fixture_assegnate:
-            start_idx_universale = fixture.indirizzo_inizio - 1 
-            
+            start_addr, _ = fixture.get_indirizzi_universali()
+            for i, canale in enumerate(fixture.modello.descrizione_canali):
+                dmx_addr = start_addr + i
+                if 1 <= dmx_addr <= 512:
+                    # Controlla per 'dimmer' nel nome o 'intensità' nella funzione
+                    is_htp = 'dimmer' in canale.nome.lower() or 'intensità' in canale.funzione.lower()
+                    dmx_channel_types[dmx_addr] = 'HTP' if is_htp else 'LTP'
+        
+        # Secondo passaggio: Applicare HTP/LTP
+        for fixture in self.fixture_assegnate:
+            start_addr, _ = fixture.get_indirizzi_universali()
             for i, valore in enumerate(fixture.valori_correnti):
-                target_index = start_idx_universale + i
+                dmx_addr = start_addr + i
+                target_index = dmx_addr - 1
                 
                 if 0 <= target_index < 512:
-                    self.array_canali[target_index] = valore
+                    channel_type = dmx_channel_types.get(dmx_addr, 'LTP')
+                    
+                    if channel_type == 'HTP':
+                        # HTP: Accumula il valore più alto trovato
+                        final_array[target_index] = max(final_array[target_index], valore)
+                    else:
+                        # LTP: L'ultimo valore scritto vince (sovrascrive).
+                        final_array[target_index] = valore
+
+        self.array_canali = final_array
+
 
     def set_valore_fixture(self, fixture_instance: IstanzaFixture, indice_canale: int, valore: int):
         """Imposta il valore di un canale specifico e aggiorna l'universo."""

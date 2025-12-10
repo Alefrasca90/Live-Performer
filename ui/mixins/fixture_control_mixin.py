@@ -17,11 +17,36 @@ from ui.components.widgets import FixtureGroupBox
 class FixtureControlMixin:
     """Gestisce la creazione e l'interazione con i controlli fader delle fixture."""
     
-    # Le variabili di stato del clipboard saranno inizializzate sulla MainWindow
+    # Le variabili di stato del clipboard saranno inzializzate sulla MainWindow
     # Ma per sicurezza le inzializziamo qui in popola_controlli_fader se non esistono.
 
+    def _get_channel_dimmer_map(self) -> dict[int, str]:
+        """Crea una mappa {dmx_addr (1-512): 'DIMMER'/'OTHER'} per le fixture assegnate. [NUOVO]"""
+        dimmer_map = {}
+        if not hasattr(self, 'universo_attivo'):
+             return dimmer_map
+
+        for instance in self.universo_attivo.fixture_assegnate: 
+            start_addr, _ = instance.get_indirizzi_universali()
+            for i, canale in enumerate(instance.modello.descrizione_canali):
+                dmx_addr = start_addr + i
+                # Logica per identificare i canali dimmer: nome contiene 'dimmer' o funzione contiene 'intensità'
+                nome = canale.nome.lower()
+                funzione = canale.funzione.lower()
+                is_dimmer = ('dimmer' in nome or 'intensità' in funzione)
+                
+                if 1 <= dmx_addr <= 512:
+                    # Non ci interessa il tipo, ma solo se è gestito da una fixture
+                    dimmer_map[dmx_addr] = 'CONTROLLED'
+        return dimmer_map
+
+
     def _apply_master_dimmer_to_array_only(self, dmx_array: list[int]) -> list[int]:
-        """Applica il Master Dimmer all'array DMX fornito. NON invia DMX, NON aggiorna UI."""
+        """
+        Applica il Master Dimmer (MDA) come moltiplicatore percentuale
+        a TUTTI i canali DMX attivi, simulando l'effetto su tutti i canali
+        che contribuiscono all'intensità (Dimmer, Colore, Strobe). [CORRETTO]
+        """
         if not hasattr(self, 'master_dimmer_value') or self.master_dimmer_value == 255:
              return dmx_array
              
@@ -30,11 +55,15 @@ class FixtureControlMixin:
         
         new_dmx_array = dmx_array[:]
         
+        # Non è necessario usare la mappa, in quanto l'MD agisce su tutti i valori
+        # DMX della fixture in modo non selettivo.
+        
         for i in range(512):
-            original_value = new_dmx_array[i]
-            if original_value > 0:
-                new_value = max(0, min(255, int(original_value * dimmer_factor)))
-                new_dmx_array[i] = new_value
+            original_value = dmx_array[i] # Valore non dimmato (raw HTP/LTP)
+            
+            # Applica la scala percentuale a tutti i valori
+            new_value = max(0, min(255, int(original_value * dimmer_factor)))
+            new_dmx_array[i] = new_value
 
         return new_dmx_array
 
@@ -42,18 +71,16 @@ class FixtureControlMixin:
         """Applica il valore del Master Dimmer (0-255) e gestisce l'aggiornamento DMX/UI."""
         self.master_dimmer_value = value
         
-        # 1. L'universo DMX deve essere prima aggiornato dai valori NON dimmati
-        # Questo è implicito se il valore è stato modificato solo dal Master Dimmer.
+        # 1. L'universo DMX deve essere prima aggiornato dai valori NON dimmati (HTP/LTP)
         self.universo_attivo.aggiorna_canali_universali()
         
-        # 2. Ottieni l'array dimmato dal Master Dimmer
+        # 2. Ottieni l'array dimmato dal Master Dimmer (MDA)
         dimmed_array = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
         
         # 3. Sostituisci l'array nell'universo DMX (questo valore è quello che verrà inviato)
         self.universo_attivo.array_canali = dimmed_array
 
         # 4. [MODIFICATO - THREADING] Invia il pacchetto DMX in un thread separato
-        # Copia l'array DMX per il thread e avvia l'invio DMX (non bloccante)
         dmx_data_copy = self.universo_attivo.array_canali[:]
         threading.Thread(target=self.dmx_comm.send_dmx_packet, args=(dmx_data_copy,)).start()
         
@@ -351,6 +378,7 @@ class FixtureControlMixin:
                         
                 # 2. Trova e aggiorna il QSlider (Indice 1 del hlayout)
                 slider_item = hlayout.itemAt(1)
+                    # Verifica che l'elemento non sia None e che sia un widget (es. un QSlider)
                 if slider_item:
                     slider = slider_item.widget()
                     if slider and hasattr(slider, 'setValue'):
@@ -375,10 +403,10 @@ class FixtureControlMixin:
         dmx_address = start + indice_canale
         label_widget.setText(f"DMX {dmx_address}. {canale_nome}: {valore}")
         
-        # 1. Imposta il valore sul modello e aggiorna l'array universale (NON dimmato)
+        # 1. Imposta il valore sul modello e aggiorna l'array universale (NON dimmato, ma con HTP/LTP)
         self.universo_attivo.set_valore_fixture(fixture_instance, indice_canale, valore)
         
-        # 2. Applica il Master Dimmer
+        # 2. Applica il Master Dimmer (MDA)
         self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
         
         self.aggiorna_simulazione_luce(fixture_instance)
@@ -390,7 +418,9 @@ class FixtureControlMixin:
     def aggiorna_simulazione_luce(self, instance: IstanzaFixture):
         """
         Aggiorna il colore nel widget StageView (Stage View) usando la miscelazione additiva
-        per simulare il colore finale (RGB + W, A, UV).
+        per simulare il colore finale (RGB + W, A, UV). [CORRETTO per MDA]
+        
+        Nota: i valori in instance.valori_correnti sono i valori DMX finali (già scalati dall'MDA).
         """
         valori = instance.valori_correnti
         
@@ -417,11 +447,12 @@ class FixtureControlMixin:
         else:
             for i, canale in enumerate(instance.modello.descrizione_canali):
                 nome = canale.nome.lower()
-                val = float(valori[i])
+                val = float(valori[i]) # Valore DMX finale (già scalato)
                 
                 # Dimmer Master
                 if 'dimmer' in nome or 'intensità' in canale.funzione.lower():
                     # Sovrascrive il dimmer master, prendendo il valore più alto trovato
+                    # Questo valore è GIA' SCALATO dall'MDA o è il valore di scena/fader scalato.
                     max_dimmer_val = max(max_dimmer_val, val) 
                     
                 # Miscelazione Additiva dei Canali Colore (RGB)
@@ -448,26 +479,15 @@ class FixtureControlMixin:
         
         # --- 2. Applicazione e Finalizzazione ---
         
-        # Capping dei valori a 255.0
+        # Capping dei valori a 255.0 (I valori qui sono già scalati dall'MDA)
         final_r_raw = min(255.0, total_r)
         final_g_raw = min(255.0, total_g)
         final_b_raw = min(255.0, total_b)
         
-        # Dimmer Factor (scalato da 0.0 a 1.0)
-        dimmer_fattore = max_dimmer_val / 255.0
+        # Non si applica più il fattore dimmer finale (per evitare doppio dimming)
         
-        # [MODIFICATO] AGGIUNTA del fattore Master Dimmer
-        master_fattore = getattr(self, 'master_dimmer_value', 255) / 255.0
-        
-        dimmer_fattore *= master_fattore
-
-        # Applicazione del Dimmer
-        final_r = final_r_raw * dimmer_fattore
-        final_g = final_g_raw * dimmer_fattore
-        final_b = final_b_raw * dimmer_fattore
-
         if self.stage_view:
-            self.stage_view.update_light_color(instance.indirizzo_inizio, final_r, final_g, final_b)
+            self.stage_view.update_light_color(instance.indirizzo_inizio, final_r_raw, final_g_raw, final_b_raw)
             
     # Firma modificata per accettare il nome utente
     def _aggiungi_istanza_core(self, selected_model: FixtureModello, start_addr: int, nome_utente: str):
