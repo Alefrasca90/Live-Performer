@@ -413,6 +413,12 @@ class DataManager:
 
     def update_audio_track_output(self, song_name, index, output_index, channels_used, output_start_channel=1, bpm=None):
         """Aggiorna l'output, i canali utilizzati e il BPM per una traccia audio specifica."""
+        
+        # 1. Load full state from disk (and update cache)
+        song_data = self.load_song(song_name)
+        if song_data is None: return
+
+        # 2. Update the in-memory cache with the specific change
         if song_name in self.audio_tracks and 0 <= index < len(self.audio_tracks[song_name]):
             track = self.audio_tracks[song_name][index]
             track["output"] = output_index
@@ -420,7 +426,13 @@ class DataManager:
             track["output_start_channel"] = output_start_channel
             if bpm is not None:
                  track["bpm"] = bpm 
-            self.save_song(song_name)
+                 
+            # Update the full data object with the new cache content
+            song_data["audio_tracks"] = self.audio_tracks.get(song_name, [])
+            
+            # 3. Save the full data explicitly
+            self.save_song(song_name, song_data)
+
 
     # --- GESTIONE TRACCE MIDI ---
     def add_midi_track(self, song_name, channel, port=None, file_path=None):
@@ -446,10 +458,22 @@ class DataManager:
 
     def update_midi_track_output(self, song_name, index, port_name, channel):
         """Aggiorna la porta e il canale per una traccia MIDI specifica."""
+        
+        # 1. Load full state from disk (and update cache)
+        song_data = self.load_song(song_name)
+        if song_data is None: return
+
+        # 2. Update the in-memory cache with the specific change
         if song_name in self.midi_tracks and 0 <= index < len(self.midi_tracks[song_name]):
             self.midi_tracks[song_name][index]["port"] = port_name
             self.midi_tracks[song_name][index]["channel"] = channel
-            self.save_song(song_name)
+            
+            # Update the full data object with the new cache content
+            song_data["midi_tracks"] = self.midi_tracks.get(song_name, [])
+            
+            # 3. Save the full data explicitly
+            self.save_song(song_name, song_data)
+
 
     # --- GESTIONE LYRICS ---
     def save_lyrics(self, song_name: str, lyrics_list: list[dict]):

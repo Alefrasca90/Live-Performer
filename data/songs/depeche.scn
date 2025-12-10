@@ -13,7 +13,7 @@
     {
       "file": "C:/Users/Alessandro/Music/midi test.mid",
       "channel": 1,
-      "port": "loopMIDI Port 1 1"
+      "port": "INTERNAL_DMX_PORT_TRIGGER"
     }
   ],
   "video_file": "C:\\Users\\Alessandro\\Documents\\GitHub\\Live-Performer\\data\\songs\\depeche\\Blue Orchid.mp4",

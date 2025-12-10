@@ -449,7 +449,7 @@
                 },
                 {
                     "midi_type": "note",
-                    "midi_number": 1,
+                    "midi_number": 2,
                     "value": 64,
                     "action_type": "scene",
                     "action_index": 1,
@@ -465,7 +465,7 @@
                 },
                 {
                     "midi_type": "note",
-                    "midi_number": 2,
+                    "midi_number": 1,
                     "value": 64,
                     "action_type": "scene",
                     "action_index": 2,

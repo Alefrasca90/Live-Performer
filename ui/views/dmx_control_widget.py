@@ -12,7 +12,7 @@ from PyQt6.QtGui import QAction
 # Import dei componenti Core del Progetto (DMX)
 from core.dmx_models import FixtureModello, IstanzaFixture, Scena, PassoChaser, Chaser 
 from core.dmx_universe import UniversoDMX
-from core.data_manager import DataManager 
+from core.data_manager import DataManager, INTERNAL_DMX_PORT 
 from core.dmx_comm import DMXController 
 from core.project_models import Progetto, UniversoStato, MidiMapping
 from core.midi_comm import MIDIController 
@@ -92,12 +92,12 @@ class DMXControlWidget(QWidget,
         # 6. Setup MIDI Control (Input)
         self.midi_controller = MIDIController(parent=self)
         
-        # Connette il segnale del controller hardware MIDI (Input) al router DMX
-        self.midi_controller.midi_message.connect(self._midi_message_router) 
+        # [MODIFICATO] Connette il segnale hardware MIDI (Input) al router DMX, con flag 'False'
+        self.midi_controller.midi_message.connect(lambda msg: self._midi_message_router(msg, False)) 
         
-        # [MODIFICATO] Connette il segnale del file MIDI (Output/Engine) al router DMX
-        if hasattr(self.midi_engine, 'midi_file_message'):
-             self.midi_engine.midi_file_message.connect(self._midi_message_router) 
+        # [MODIFICATO] Connette il segnale MIDI INTERNO dal MidiEngine (usa la firma completa con il flag)
+        if hasattr(self.midi_engine, 'internal_midi_to_dmx'):
+             self.midi_engine.internal_midi_to_dmx.connect(self._midi_message_router) 
              
         self._load_midi_settings() 
         
@@ -327,10 +327,11 @@ class DMXControlWidget(QWidget,
     def _handle_dmx_connection(self):
          super()._handle_dmx_connection()
          
-    def _midi_message_router(self, msg):
+    # [MODIFICATO] Aggiunta firma completa al router
+    def _midi_message_router(self, msg, is_internal_dmx_trigger: bool = False): 
         # La logica di log MIDI IN è stata spostata nel tab 'MIDI Monitor'.
         # self._log_midi_message(msg)
-        self._handle_midi_message(msg) 
+        self._handle_midi_message(msg, is_internal_dmx_trigger)
         
     def _open_add_fixture_dialog(self):
         super()._open_add_fixture_dialog()

@@ -14,10 +14,10 @@ from ui.components.midi_monitor_widget import MidiMonitorWidget
 # Import Engine e Player Video
 from engines.video_engine import VideoEngine 
 from ui.views.video_player_widget import VideoPlayerWidget 
-from core.data_manager import DataManager
+from core.data_manager import DataManager, INTERNAL_DMX_PORT # [MODIFICATO] Importa INTERNAL_DMX_PORT
 
-# [NUOVO] Costante per la porta interna (non invia MIDI esterno)
-INTERNAL_DMX_PORT = "INTERNAL_DMX_PORT_TRIGGER"
+
+# [RIMOSSA LA RIDEFINIZIONE DELLA COSTANTE]
 
 
 class SongEditorWidget(QWidget):

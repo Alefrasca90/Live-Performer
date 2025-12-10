@@ -54,17 +54,20 @@ class MIDIControlMixin:
              self.midi_engine.set_dmx_mappings(self.midi_mappings) 
 
 
-    def _handle_midi_message(self, msg):
+    def _handle_midi_message(self, msg, is_internal_dmx_trigger: bool = False):
         """Callback eseguita nel thread principale per processare CC/PC/Note in base alle mappature."""
         
         # 0. FILTRO CANALE MIDI
-        # Mido usa channel 0-15 (corrispondente a 1-16)
-        midi_channel_mido = getattr(msg, 'channel', -1) 
         
-        if self.midi_channel_filter != 0:
-             # Controlla se il canale del messaggio (0-15) corrisponde al filtro (1-16)
-             if midi_channel_mido + 1 != self.midi_channel_filter:
-                 return # Ignora il messaggio
+        # [MODIFICATO] Bypass del filtro se il messaggio proviene dal MIDI file interno
+        if not is_internal_dmx_trigger: 
+            # Mido usa channel 0-15 (corrispondente a 1-16)
+            midi_channel_mido = getattr(msg, 'channel', -1) 
+            
+            if self.midi_channel_filter != 0:
+                 # Controlla se il canale del messaggio (0-15) corrisponde al filtro (1-16)
+                 if midi_channel_mido + 1 != self.midi_channel_filter:
+                     return # Ignora il messaggio
 
         # 1. Estrazione dei dati MIDI per la ricerca
         midi_type = msg.type
@@ -115,6 +118,11 @@ class MIDIControlMixin:
 
             # --- Esecuzione Azione ---
             if is_match:
+                
+                # [NUOVO] Ignora le mappature "internal_only" se il messaggio NON è del tipo interno.
+                if mapping.internal_only and not is_internal_dmx_trigger:
+                     continue
+                
                 # 3. Esegue l'azione basata sull'indice
                 
                 # Assicuriamo che le liste esistano

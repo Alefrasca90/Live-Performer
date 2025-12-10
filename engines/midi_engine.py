@@ -3,6 +3,8 @@ import mido
 import threading
 import time
 import os 
+from core.data_manager import INTERNAL_DMX_PORT 
+
 
 # MidiEngine ora deve ereditare da QObject per usare i segnali PyQt
 class MidiEngine(QObject):
@@ -11,11 +13,21 @@ class MidiEngine(QObject):
     """
     # Signal per notificare i messaggi MIDI in uscita: (timestamp: float, message: str)
     midi_message_sent = pyqtSignal(float, str) 
+    # [MODIFICATO] Segnale per inviare messaggi MIDI grezzi al router DMX interno, con flag di bypass
+    internal_midi_to_dmx = pyqtSignal(object, bool) 
 
     def __init__(self, parent=None): 
         super().__init__(parent)
         self.driver = None
-        self.outputs = mido.get_output_names()
+        # Assicurati che mido sia disponibile o gestito da un wrapper (come da midi_comm.py)
+        # Qui usiamo la versione del file fornito (senza la gestione dell'errore di import)
+        try:
+             self.outputs = mido.get_output_names()
+        except NameError:
+             self.outputs = []
+        except ImportError:
+             self.outputs = []
+
         self.tracks = {}  # { song: [ {file, channel, port} ] }
         self.default_port = None
         
@@ -39,7 +51,12 @@ class MidiEngine(QObject):
     # -------------------------------------------------------------
 
     def refresh_outputs(self):
-        self.outputs = mido.get_output_names()
+        try:
+             import mido
+             self.outputs = mido.get_output_names()
+        except ImportError:
+             self.outputs = []
+
 
     def set_driver(self, driver_name, port_name):
         self.driver = driver_name
@@ -113,50 +130,61 @@ class MidiEngine(QObject):
         file_path = track_data.get("file")
         port_name = track_data["port"]
         channel = track_data["channel"]
-        file_name = file_path.split('/')[-1] if file_path else "N/D"
+        file_name = os.path.basename(file_path) if file_path else "N/D"
 
         if not file_path or not os.path.exists(file_path):
              self.midi_message_sent.emit(0.0, f"[ERRORE {file_name}] File MIDI non trovato al percorso: {file_path}")
              return
 
         try:
-            # DEBUG: Avviso che il thread è pronto a tentare il playback
-            self.midi_message_sent.emit(0.0, f"[{file_name}] Tentativo di apertura porta '{port_name}'...")
-
-            # 1. Carica il file MIDI
             midi_file = mido.MidiFile(file_path)
             
-            # 2. Invia i messaggi
-            self.midi_message_sent.emit(0.0, f"[{file_name}] Avvio playback su {port_name}, canale {channel}...")
+            is_internal_dmx = (port_name == INTERNAL_DMX_PORT)
             
-            with mido.open_output(port_name, autoreset=True) as out:
-                start_time = time.time()
-                first_message = True # FLAG DI DEBUG
+            if is_internal_dmx:
+                # --- LOGICA INTERNA (ROUTING AL DMX) ---
+                self.midi_message_sent.emit(0.0, f"[{file_name}] Avvio playback INTERNO per DMX, canale {channel}...")
                 
-                for msg in midi_file.play(meta_messages=False, message_channel=channel, tempo=mido.bpm2tempo(master_bpm)):
-                    
-                    if not self.playback_running:
-                        break
+                start_time = time.time()
+                # [FIX CRITICO] Rimosso 'tempo=mido.bpm2tempo(master_bpm)'
+                for msg in midi_file.play(meta_messages=False):
+                    if not self.playback_running: break
                         
                     msg.channel = channel 
-                    out.send(msg)
+                    self.internal_midi_to_dmx.emit(msg, True) 
                     
                     current_time = time.time() - start_time
+                    self.midi_message_sent.emit(current_time, f"[INTERNAL] {msg}") 
+                
+            else:
+                # --- LOGICA ESTERNA (HARDWARE MIDI) ---
+                self.midi_message_sent.emit(0.0, f"[{file_name}] Tentativo di apertura porta '{port_name}'...")
+                
+                with mido.open_output(port_name, autoreset=True) as out:
+                    start_time = time.time()
+                    first_message = True 
                     
-                    # NUOVO: Emette un segnale esplicito per la prima volta
-                    if first_message:
-                         self.midi_message_sent.emit(current_time, f"[{file_name}] **SEQUENZA INIZIATA** - Primo messaggio inviato: {msg}")
-                         first_message = False
+                    # [FIX CRITICO] Rimosso 'tempo=mido.bpm2tempo(master_bpm)'
+                    for msg in midi_file.play(meta_messages=False):
+                        
+                        if not self.playback_running: break
+                            
+                        msg.channel = channel 
+                        out.send(msg)
+                        
+                        current_time = time.time() - start_time
+                        
+                        if first_message:
+                             self.midi_message_sent.emit(current_time, f"[{file_name}] **SEQUENZA INIZIATA** - Primo messaggio inviato: {msg}")
+                             first_message = False
 
-                    self.midi_message_sent.emit(current_time, f"[{file_name}] {msg}")
-                    
-            self.midi_message_sent.emit(time.time() - start_time, f"[{file_name}] Fine playback.")
+                        self.midi_message_sent.emit(current_time, f"[{file_name}] {msg}")
+                        
+            self.midi_message_sent.emit(time.time() - (start_time if 'start_time' in locals() else 0.0), f"[{file_name}] Fine playback.")
             
-        except mido.UnknownFileTypeError:
-            error_msg = f"[{file_name}] ERRORE: Formato file MIDI non valido o corrotto."
-            self.midi_message_sent.emit(0.0, f"[ERRORE] {error_msg}")
+        # [FIX] Gestione delle eccezioni generiche
         except Exception as e:
-            # CATTURA ERRORI DI PORTA (mido.open_output) o altri errori interni
+            # Cattura errori generici di file o di connessione porta MIDI
             error_msg = f"[{file_name}] ERRORE CRITICO: {type(e).__name__}: {e}"
             self.midi_message_sent.emit(0.0, f"[ERRORE] {error_msg}")
             
@@ -166,6 +194,10 @@ class MidiEngine(QObject):
     
     def send_note(self, port_name, channel, note, velocity=64):
         """Invia un singolo messaggio Note On."""
+        # [MODIFICATO] Salta se è la porta interna
+        if port_name == INTERNAL_DMX_PORT:
+            return
+            
         try:
             with mido.open_output(port_name) as out:
                 msg = mido.Message("note_on", note=note, velocity=velocity, channel=channel)
@@ -174,7 +206,7 @@ class MidiEngine(QObject):
             print(f"Errore invio MIDI su porta {port_name}: {e}")
 
     def send_all_notes_off(self, song_name):
-        """Invia un Control Change per spegnere tutte le note attive (All Notes Off)."""
+        """Invia un Control Change per spegnere tutte le note attive (All Notes Off), ignorando la porta interna."""
         if song_name not in self.tracks:
             return
 
@@ -188,6 +220,10 @@ class MidiEngine(QObject):
             port_name = track["port"]
             channel = track["channel"]
             
+            # [MODIFICATO] Salta se la porta è quella interna DMX
+            if port_name == INTERNAL_DMX_PORT:
+                 continue
+                 
             try:
                 # Controller 123: All Notes Off
                 msg = mido.Message('control_change', channel=channel, control=123, value=0)
@@ -208,8 +244,7 @@ class MidiEngine(QObject):
         self.paused = False
         self.playback_running = True # Abilita l'esecuzione dei thread file
 
-        # **POTENZIALE RIGA 222 QUI** - CORRETTA
-        if bpm is not None:  # <--- I due punti sono qui
+        if bpm is not None: 
              self._current_song_bpm = bpm
         
         # 1. Gestione MIDI Clock
@@ -233,7 +268,6 @@ class MidiEngine(QObject):
         # 2. Gestione Playback File MIDI
         midi_file_tracks = [t for t in self.tracks.get(song_name, []) if t.get("file")]
         
-        # **MESSAGGIO DI DEBUG CRITICO**
         file_count = len(midi_file_tracks)
         self.midi_message_sent.emit(0.0, f"[DEBUG] Trovate {file_count} tracce MIDI con file.")
         
@@ -244,11 +278,11 @@ class MidiEngine(QObject):
             # Avvia un thread per OGNI file MIDI
             for track_data in midi_file_tracks:
                 
-                file_name = track_data['file'].split('/')[-1]
+                file_name = os.path.basename(track_data['file']) if track_data.get('file') else 'N/D'
                 port_name = track_data['port']
                 
-                # VALIDATION CHECK: Verifica se la porta è configurata correttamente prima di avviare il thread
-                if port_name not in self.outputs:
+                # [MODIFICATO] VALIDATION CHECK: Permette la porta interna
+                if port_name not in self.outputs and port_name != INTERNAL_DMX_PORT:
                     self.midi_message_sent.emit(0.0, f"[ERRORE] Porta MIDI '{port_name}' non trovata per '{file_name}'. Controlla le impostazioni.")
                     continue
                 
@@ -304,4 +338,5 @@ class MidiEngine(QObject):
 
         # 2. Gestione Playback File MIDI
         self.playback_running = False
+        # Assicurati che i thread terminino (gestito da self.playback_running = False nel thread)
         self.playback_threads[song_name] = []

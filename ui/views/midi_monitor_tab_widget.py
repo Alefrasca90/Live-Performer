@@ -42,29 +42,59 @@ class MidiMonitorTabWidget(QWidget):
         # 1. Connessione Segnale MIDI IN (dal controller hardware)
         self.midi_controller.midi_message.connect(self._log_midi_input_message)
         
-        # 2. Connessione Segnale MIDI OUT (dall'engine di riproduzione file/clock)
+        # [CRITICO] 2. Connessione per i segnali MIDI INTERNI (dal file del brano)
+        # Questo intercetta l'emissione del MidiEngine per la diagnostica nel monitor.
+        if hasattr(self.midi_engine, 'internal_midi_to_dmx'):
+             self.midi_engine.internal_midi_to_dmx.connect(self._log_internal_midi_dmx_message)
+        
+        # 3. Connessione Segnale MIDI OUT (dall'engine di riproduzione file/clock)
         self.midi_engine.midi_message_sent.connect(self.output_monitor.add_message)
 
     def _log_midi_input_message(self, msg):
-        """Formatta e aggiunge il messaggio MIDI IN alla lista del monitor (Logic moved from DMXControlWidget/MainWindow)."""
+        """Formatta e aggiunge il messaggio MIDI IN dalla sorgente hardware."""
         log_text = ""
-        # Mido uses type 'note_on'/'note_off', 'control_change', 'program_change'
+        channel_display = getattr(msg, 'channel', -1) + 1
 
         if msg.type == 'note_on' and msg.velocity > 0:
-            log_text = f"嫉 ON | CH {msg.channel + 1:02} | Note {msg.note:03} | Vel {msg.velocity:03}"
+            log_text = f"嫉 ON | CH {channel_display:02} | Note {msg.note:03} | Vel {msg.velocity:03} [HARDWARE]"
         elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
-            log_text = f"嫉 OFF | CH {msg.channel + 1:02} | Note {msg.note:03}"
+            log_text = f"嫉 OFF | CH {channel_display:02} | Note {msg.note:03} [HARDWARE]"
         elif msg.type == 'control_change':
-            log_text = f"字 CC | CH {msg.channel + 1:02} | Num {msg.control:03} | Val {msg.value:03}"
+            if msg.control == 121 or msg.control == 123:
+                 log_text = f"字 CC | CH {channel_display:02} | Num {msg.control:03} | Val {msg.value:03} [DRIVER RESET]"
+            else:
+                 log_text = f"字 CC | CH {channel_display:02} | Num {msg.control:03} | Val {msg.value:03} [HARDWARE]"
         elif msg.type == 'program_change':
-            log_text = f"朕 PC | CH {msg.channel + 1:02} | Num {msg.program + 1:03}"
+            log_text = f"朕 PC | CH {channel_display:02} | Num {msg.program + 1:03} [HARDWARE]"
         else:
-             # Other messages like timing_clock, sysex, etc.
-             log_text = f"叱 {msg.type.upper()} | {str(msg)}" 
+             log_text = f"叱 {msg.type.upper()} | {str(msg)} [HARDWARE]" 
 
         if log_text:
-            # Si usa 0.0 come timestamp fittizio, in quanto il monitor IN non è sincronizzato
-            self.input_monitor.add_message(0.0, log_text) 
+            self.input_monitor.add_message(0.0, f"(SYNC) {log_text}") 
+
+    def _log_internal_midi_dmx_message(self, msg, is_dmx_trigger: bool):
+        """[NUOVO SLOT] Formatata e aggiunge il messaggio MIDI dalla traccia file interna."""
+        if not is_dmx_trigger:
+             return # Ignora se non è specificamente un trigger DMX interno
+             
+        log_text = ""
+        
+        channel_display = msg.channel + 1
+        
+        if msg.type == 'note_on' and msg.velocity > 0:
+            log_text = f"嫉 ON | CH {channel_display:02} | Note {msg.note:03} | Vel {msg.velocity:03} [DMX INTERNAL]"
+        elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
+            log_text = f"嫉 OFF | CH {channel_display:02} | Note {msg.note:03} [DMX INTERNAL]"
+        elif msg.type == 'control_change':
+            log_text = f"字 CC | CH {channel_display:02} | Num {msg.control:03} | Val {msg.value:03} [DMX INTERNAL]"
+        elif msg.type == 'program_change':
+            log_text = f"朕 PC | CH {channel_display:02} | Num {msg.program + 1:03} [DMX INTERNAL]"
+        else:
+             log_text = f"叱 {msg.type.upper()} | {str(msg)} [DMX INTERNAL]"
+
+        if log_text:
+            self.input_monitor.add_message(0.0, f"(SYNC) {log_text}") 
+
 
     def cleanup(self):
         # Disconnette i segnali per prevenire memory leak o crash
@@ -76,3 +106,9 @@ class MidiMonitorTabWidget(QWidget):
              self.midi_engine.midi_message_sent.disconnect(self.output_monitor.add_message)
         except TypeError:
              pass
+        # [NUOVO] Disconnette il segnale interno
+        if hasattr(self.midi_engine, 'internal_midi_to_dmx'):
+            try:
+                self.midi_engine.internal_midi_to_dmx.disconnect(self._log_internal_midi_dmx_message)
+            except TypeError:
+                pass
