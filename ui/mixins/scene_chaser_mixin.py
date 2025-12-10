@@ -139,11 +139,10 @@ class SceneChaserMixin:
         threading.Thread(target=self.dmx_comm.send_dmx_packet, args=(dmx_data_copy,)).start()
 
         # 5. UI UPDATES
-        def update_ui_and_show_message():
-            self._aggiorna_ui_fader_e_stage()
-            QMessageBox.information(self, "Scena Applicata", f"Scena '{scena_da_applicare.nome}' applicata.")
+        # Nota: Eseguiamo l'aggiornamento UI in modo sincrono per evitare race condition con il fader Master Dimmer (CC).
+        self._aggiorna_ui_fader_e_stage()
+        QTimer.singleShot(10, lambda: QMessageBox.information(self, "Scena Applicata", f"Scena '{scena_da_applicare.nome}' applicata."))
 
-        QTimer.singleShot(10, update_ui_and_show_message)
         
     def _cancella_scena_selezionata(self):
         """Cancella la scena selezionata."""
@@ -423,17 +422,18 @@ class SceneChaserMixin:
                 fixture.valori_correnti[i] = self.universo_attivo.array_canali[start_idx + i]
 
     def _aggiorna_ui_fader_e_stage(self):
-        """Metodo di utilità per raggruppare l'aggiornamento UI pesante in modo asincrono."""
-        def run_update():
-             # 1. Sincronizza i valori dall'array DMX agli oggetti IstanzaFixture
-             self._push_dmx_to_instances()
-             
-             # 2. Aggiorna i valori dei fader (legge dagli oggetti IstanzaFixture)
-             self._aggiorna_valori_fader()
-             
-             # 3. Aggiorna la simulazione luce (Stage View)
-             for instance in self.universo_attivo.fixture_assegnate:
-                 self.aggiorna_simulazione_luce(instance)
-                 
-        # Esecuzione asincrona per prevenire il freeze
-        QTimer.singleShot(1, run_update)
+        """
+        [MODIFICATO: ESECUZIONE SINCRONA] Aggiorna i valori UI (Fader, Stage View) in modo sincrono.
+        """
+        
+        # 1. Sincronizza i valori dall'array DMX agli oggetti IstanzaFixture (dimmati)
+        self._push_dmx_to_instances()
+        
+        # 2. Aggiorna i valori dei fader (legge dagli oggetti IstanzaFixture)
+        if hasattr(self, '_aggiorna_valori_fader'):
+            self._aggiorna_valori_fader()
+        
+        # 3. Aggiorna la simulazione luce (Stage View)
+        if hasattr(self, 'aggiorna_simulazione_luce'):
+            for instance in self.universo_attivo.fixture_assegnate:
+                self.aggiorna_simulazione_luce(instance)

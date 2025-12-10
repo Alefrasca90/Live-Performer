@@ -18,6 +18,9 @@ class MidiEngine(QObject):
     # [MODIFICATO] Segnale per inviare messaggi MIDI grezzi al router DMX interno, con flag di bypass
     internal_midi_to_dmx = pyqtSignal(object, bool) 
 
+    # [NUOVO] Limite di frequenza per i messaggi CC interni (20ms = 50 Hz)
+    INTERNAL_CC_RATE_MS = 20
+
     def __init__(self, parent=None): 
         super().__init__(parent)
         self.driver = None
@@ -46,6 +49,9 @@ class MidiEngine(QObject):
         # --- PLAYBACK STATE ---
         self.playing = False
         self.paused = False
+        
+        # [NUOVO] Stato per il campionamento dei CC interni
+        self._last_internal_cc_emit = time.time()
 
 
     # -------------------------------------------------------------
@@ -151,6 +157,13 @@ class MidiEngine(QObject):
                 # [FIX CRITICO] Rimosso 'tempo=mido.bpm2tempo(master_bpm)'
                 for msg in midi_file.play(meta_messages=False):
                     if not self.playback_running: break
+                        
+                    # [NUOVO FIX] Filtro anti-flooding per messaggi CC destinati a DMX
+                    if msg.type == 'control_change':
+                         current_time_cc = time.time()
+                         if (current_time_cc - self._last_internal_cc_emit) * 1000 < self.INTERNAL_CC_RATE_MS:
+                              continue
+                         self._last_internal_cc_emit = current_time_cc # Aggiorna l'ultima emissione CC
                         
                     msg.channel = channel 
                     self.internal_midi_to_dmx.emit(msg, True) 
