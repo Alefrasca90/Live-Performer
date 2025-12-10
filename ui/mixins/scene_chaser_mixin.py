@@ -38,11 +38,16 @@ class SceneChaserMixin:
             if self.chaser_timer.isActive() or self.fade_timer.isActive():
                 self._ferma_chaser(show_message=False) 
                 
-            # 2. Applica la scena
+            # 2. Applica la scena (non dimmata)
             self.universo_attivo.applica_scena(scena_da_applicare)
             
-            # 3. Aggiorna UI e DMX
+            # 3. [NUOVO] Applica il Master Dimmer e invia DMX
+            if hasattr(self, '_apply_master_dimmer_to_array_only'): # Assicura che il mixin FixtureControlMixin sia presente
+                 self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
+
             self.dmx_comm.send_dmx_packet(self.universo_attivo.array_canali)
+            
+            # 4. Aggiorna UI (legge i valori dimmati)
             self._aggiorna_ui_fader_e_stage()
         else:
              print(f"MIDI Error: Indice scena {index} fuori limite.")
@@ -119,11 +124,16 @@ class SceneChaserMixin:
         if self.chaser_timer.isActive() or self.fade_timer.isActive():
             self._ferma_chaser(show_message=False) 
             
-        # 2. APPLY SCENE & SEND DMX (Essential to be synchronous for hardware)
+        # 2. APPLY SCENE (NON dimmata)
         self.universo_attivo.applica_scena(scena_da_applicare)
+        
+        # 3. [NUOVO] Applica il Master Dimmer e invia DMX
+        if hasattr(self, '_apply_master_dimmer_to_array_only'):
+             self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
+
         self.dmx_comm.send_dmx_packet(self.universo_attivo.array_canali)
 
-        # 3. UI UPDATES (ASYNCHRONOUS for freeze prevention)
+        # 4. UI UPDATES
         def update_ui_and_show_message():
             self._aggiorna_ui_fader_e_stage()
             QMessageBox.information(self, "Scena Applicata", f"Scena '{scena_da_applicare.nome}' applicata.")
@@ -282,11 +292,18 @@ class SceneChaserMixin:
                 return # Si esce, il fade_timer gestirà l'aggiornamento DMX
 
             else:
-                # 2. Nessun Fade In, applicazione istantanea
+                # 2. Nessun Fade In, applicazione istantanea (NON dimmata)
                 self.universo_attivo.applica_scena(passo.scena)
-                self._aggiorna_ui_fader_e_stage()
                 
-                # 3. Imposta Hold Time
+                # 3. [NUOVO] Applica il Master Dimmer e invia DMX
+                if hasattr(self, '_apply_master_dimmer_to_array_only'):
+                     self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
+                     
+                self._aggiorna_ui_fader_e_stage() # <--- Aggiorna UI, usa l'array dimmato
+                self.dmx_comm.send_dmx_packet(self.universo_attivo.array_canali)
+
+
+                # 4. Imposta Hold Time
                 tempo_totale_ms = int(passo.tempo_permanenza * 1000)
                 if tempo_totale_ms > 0:
                      self.chaser_timer.setInterval(tempo_totale_ms) 
@@ -306,18 +323,34 @@ class SceneChaserMixin:
         
         if fade_time <= 0.0:
             self.universo_attivo.applica_scena(target_scena)
+            
+            # [NUOVO] Applica il Master Dimmer e invia DMX
+            if hasattr(self, '_apply_master_dimmer_to_array_only'):
+                 self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
+
             self._aggiorna_ui_fader_e_stage()
+            self.dmx_comm.send_dmx_packet(self.universo_attivo.array_canali)
             return
         
+        # 1. Prepara i valori di partenza (valori attuali, potenzialmente già dimmati)
         start_values = self.universo_attivo.array_canali[:] 
-        target_values = self.universo_attivo.array_canali[:]
+        
+        # 2. Calcola i valori di destinazione (NON dimmati, per l'interpolazione lineare)
+        target_raw_values = self.universo_attivo.array_canali[:]
         
         for dmx_addr, val in target_scena.valori_canali.items():
-             target_values[dmx_addr - 1] = val
+             target_raw_values[dmx_addr - 1] = val
+        
+        # 3. [NUOVO] Applica il Master Dimmer ai valori di destinazione
+        if hasattr(self, '_apply_master_dimmer_to_array_only'):
+             target_values = self._apply_master_dimmer_to_array_only(target_raw_values)
+        else:
+             target_values = target_raw_values
+        
 
         self._FADE_DATA = {
             'start_values': start_values,
-            'target_values': target_values,
+            'target_values': target_values, # <--- Ora dimmati
             'duration_ms': fade_time * 1000,
             'start_time': time.time(),
             'target_scene_name': target_scena.nome
@@ -339,7 +372,7 @@ class SceneChaserMixin:
         
         new_dmx_array = self.universo_attivo.array_canali[:] 
         
-        # 1. Interpolazione
+        # 1. Interpolazione (tra due array dimmati)
         for i in range(512):
             start = data['start_values'][i]
             target = data['target_values'][i]
@@ -365,6 +398,9 @@ class SceneChaserMixin:
     
     def _push_dmx_to_instances(self):
         """Sincronizza i valori DMX dall'array raw agli oggetti IstanzaFixture."""
+        # NOTA: Questo metodo legge i valori DMX *dimmati* da array_canali 
+        # e li salva in fixture.valori_correnti. Questo non è ideale per l'editing
+        # ma è necessario per la coerenza del fader slider.
         for fixture in self.universo_attivo.fixture_assegnate:
             start_addr, _ = fixture.get_indirizzi_universali()
             start_idx = start_addr - 1

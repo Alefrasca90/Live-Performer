@@ -71,6 +71,10 @@ class DMXControlWidget(QWidget,
              self._ricostruisci_universi() 
              self.universo_attivo = next(iter(self.universi.values()))
 
+        # [NUOVO] 2b. Inizializzazione dello stato Master Dimmer
+        # Questo valore verrà letto e scritto dal FixtureControlMixin
+        self.master_dimmer_value = 255 
+
         # 3. DMX Controller
         current_u_state = next((u for u in self.progetto.universi_stato if u.id_universo == self.universo_attivo.id_universo), Progetto.crea_vuoto().universi_stato[0])
         dmx_port = getattr(current_u_state, 'dmx_port_name', 'COM5') 
@@ -119,6 +123,12 @@ class DMXControlWidget(QWidget,
 
         self._ricostruisci_scene_chasers(u_stato) 
         self.popola_controlli_fader()
+        
+        # [MODIFICATO] Invia il pacchetto DMX applicando il master dimmer (che è 255 di default qui)
+        self.universo_attivo.aggiorna_canali_universali() # Popola l'array con valori non dimmati
+        if hasattr(self, '_apply_master_dimmer_to_array_only'):
+             self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
+        
         self.dmx_comm.send_dmx_packet(self.universo_attivo.array_canali)
 
 

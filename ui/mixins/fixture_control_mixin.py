@@ -2,7 +2,7 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QMessageBox, QSpinBox, QSizePolicy, QSlider, 
+    QMessageBox, QSpinBox, QSizePolicy, QSlider, QGroupBox,
     QSpacerItem, QPushButton # AGGIUNTO QPushButton
 )
 from PyQt6.QtCore import Qt, QTimer
@@ -17,14 +17,70 @@ class FixtureControlMixin:
     """Gestisce la creazione e l'interazione con i controlli fader delle fixture."""
     
     # Le variabili di stato del clipboard saranno inizializzate sulla MainWindow
-    # Ma per sicurezza le inizializziamo qui in popola_controlli_fader se non esistono.
-    
+    # Ma per sicurezza le inzializziamo qui in popola_controlli_fader se non esistono.
+
+    def _apply_master_dimmer_to_array_only(self, dmx_array: list[int]) -> list[int]:
+        """Applica il Master Dimmer all'array DMX fornito. NON invia DMX, NON aggiorna UI."""
+        if not hasattr(self, 'master_dimmer_value') or self.master_dimmer_value == 255:
+             return dmx_array
+             
+        master_dimmer_value = self.master_dimmer_value
+        dimmer_factor = master_dimmer_value / 255.0
+        
+        new_dmx_array = dmx_array[:]
+        
+        for i in range(512):
+            original_value = new_dmx_array[i]
+            if original_value > 0:
+                new_value = max(0, min(255, int(original_value * dimmer_factor)))
+                new_dmx_array[i] = new_value
+
+        return new_dmx_array
+
+    def _apply_master_dimmer(self, value: int):
+        """Applica il valore del Master Dimmer (0-255) e gestisce l'aggiornamento DMX/UI."""
+        self.master_dimmer_value = value
+        
+        # 1. L'universo DMX deve essere prima aggiornato dai valori NON dimmati
+        # (Questo è implicito se il valore è stato modificato solo dal Master Dimmer)
+        self.universo_attivo.aggiorna_canali_universali()
+        
+        # 2. Ottieni l'array dimmato dal Master Dimmer
+        dimmed_array = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
+        
+        # 3. Sostituisci l'array nell'universo DMX (questo valore è quello che verrà inviato)
+        self.universo_attivo.array_canali = dimmed_array
+
+        # 4. Aggiorna UI e invia il pacchetto DMX
+        self.dmx_comm.send_dmx_packet(self.universo_attivo.array_canali)
+        
+        # 5. Aggiorna la simulazione luce e i fader UI (che leggono i valori dimmati dal nuovo array)
+        self._push_dmx_to_instances()
+        for instance in self.universo_attivo.fixture_assegnate:
+             self.aggiorna_simulazione_luce(instance)
+        self._aggiorna_valori_fader()
+        
+        
+    def _gestisci_cambio_valore_master_dmx(self, value: int, label_widget: QLabel):
+        """Gestisce la modifica del Master Dimmer da parte dell'utente."""
+        if self.chaser_timer.isActive():
+            self._ferma_chaser(show_message=False)
+            QTimer.singleShot(10, lambda: QMessageBox.information(self, "Controllo Manuale", "Chaser interrotto per controllo manuale."))
+            
+        label_widget.setText(f"Dimmer Master: {value}")
+        self._apply_master_dimmer(value)
+        
+
     def popola_controlli_fader(self):
         """Crea i fader utilizzando il widget FixtureGroupBox (Accordion). Chiamato solo all'avvio o al cambio di fixture."""
         
         # Inizializza il clipboard interno se non è già stato fatto
         if not hasattr(self, 'fixture_clipboard'):
              self.fixture_clipboard = {}
+             
+        # [NUOVO] Inizializza il Master Dimmer se non esiste (default 255 = 100%)
+        if not hasattr(self, 'master_dimmer_value'):
+             self.master_dimmer_value = 255
         
         # Pulizia del layout
         # 'self.fader_layout' must exist, ensured in _setup_ui
@@ -36,6 +92,30 @@ class FixtureControlMixin:
         # Rimuove lo spacer alla fine
         if self.fader_layout.itemAt(self.fader_layout.count() - 1) and self.fader_layout.itemAt(self.fader_layout.count() - 1).spacerItem():
             self.fader_layout.removeItem(self.fader_layout.itemAt(self.fader_layout.count() - 1))
+            
+        # --- [NUOVO] 0. Master Dimmer Control ---
+        master_group = QGroupBox("Master Dimmer")
+        master_layout = QVBoxLayout(master_group)
+        
+        master_fader_layout = QHBoxLayout()
+        self.master_label = QLabel(f"Dimmer Master: {self.master_dimmer_value}")
+        self.master_label.setFixedWidth(120)
+        
+        self.master_slider = QSlider(Qt.Orientation.Horizontal)
+        self.master_slider.setRange(0, 255)
+        self.master_slider.setValue(self.master_dimmer_value)
+        
+        # Connessione al nuovo gestore
+        self.master_slider.valueChanged.connect(
+            lambda val, lbl=self.master_label: self._gestisci_cambio_valore_master_dmx(val, lbl)
+        )
+        
+        master_fader_layout.addWidget(self.master_label)
+        master_fader_layout.addWidget(self.master_slider)
+        master_layout.addLayout(master_fader_layout)
+        
+        self.fader_layout.addWidget(master_group)
+        # --- FINE Master Dimmer Control ---
 
         # Recupera tutte le istanze stato per associare il nome utente e l'indice
         u_stato = next((u for u in self.progetto.universi_stato if u.id_universo == self.universo_attivo.id_universo))
@@ -158,13 +238,18 @@ class FixtureControlMixin:
                 pasted_count += 1
                 
         if pasted_count > 0:
-            # 1. Aggiorna l'universo DMX e Stage View
+            # 1. Aggiorna l'universo DMX (non dimmato)
             self.universo_attivo.aggiorna_canali_universali()
-            self._aggiorna_valori_fader()
-            self.aggiorna_simulazione_luce(target_instance)
+            
+            # 2. [NUOVO] Applica il Master Dimmer e invia DMX
+            self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
             self.dmx_comm.send_dmx_packet(self.universo_attivo.array_canali)
             
-            # 2. Mostra successo
+            # 3. Aggiorna UI e Stage View
+            self._aggiorna_valori_fader()
+            self.aggiorna_simulazione_luce(target_instance)
+            
+            # 4. Mostra successo
             QMessageBox.information(self, 
                                     "Incolla Effettuato", 
                                     f"Incollati {pasted_count} di {copied_count} valori in '{target_instance.modello.nome}' ({target_instance.indirizzo_inizio}).")
@@ -183,13 +268,24 @@ class FixtureControlMixin:
         if not hasattr(self, 'fader_layout'):
             return
 
+        # [NUOVO] Aggiorna il Master Dimmer UI (è sempre il primo elemento del layout)
+        if hasattr(self, 'master_slider') and self.fader_layout.count() > 0 and self.universo_attivo:
+             # Se il Master Dimmer è nel layout, aggiorna il suo valore
+             if self.master_slider.value() != self.master_dimmer_value:
+                  try:
+                       self.master_slider.blockSignals(True)
+                       self.master_slider.setValue(self.master_dimmer_value)
+                       self.master_label.setText(f"Dimmer Master: {self.master_dimmer_value}")
+                  finally:
+                       self.master_slider.blockSignals(False)
+
+        # L'indice 0 del fader_layout è ora Master Dimmer Group. Le fixture partono da 1.
         for idx, instance in enumerate(self.universo_attivo.fixture_assegnate):
             
             # Ignoriamo lo Spacer all'ultimo indice, se presente
-            if idx >= self.fader_layout.count(): continue
+            if idx + 1 >= self.fader_layout.count(): continue
             
-            item = self.fader_layout.itemAt(idx)
-            if not item: continue
+            item = self.fader_layout.itemAt(idx + 1) # <--- MODIFICATO l'indice per il Master Dimmer Group
             
             accordion_group = item.widget()
             if not accordion_group or not isinstance(accordion_group, FixtureGroupBox): continue
@@ -201,9 +297,6 @@ class FixtureControlMixin:
             
             start, _ = instance.get_indirizzi_universali()
             
-            # Controlla la presenza del layout di controllo (Copia/Incolla)
-            # L'indice 0 è il layout Copia/Incolla, gli indici successivi sono i canali
-            
             # Aggiorna ogni canale (riga nel vbox)
             for i in range(instance.modello.numero_canali):
                 # Tenendo conto del layout di controllo (indice 0)
@@ -213,6 +306,7 @@ class FixtureControlMixin:
                 hlayout = hlayout_item.layout()
                 if not hlayout: continue
                 
+                # Valore letto dall'istanza (che a sua volta è stato aggiornato da _push_dmx_to_instances)
                 valore = instance.valori_correnti[i]
                 
                 # 1. Trova e aggiorna il QLabel (Indice 0 del hlayout)
@@ -249,7 +343,11 @@ class FixtureControlMixin:
         dmx_address = start + indice_canale
         label_widget.setText(f"DMX {dmx_address}. {canale_nome}: {valore}")
         
+        # 1. Imposta il valore sul modello e aggiorna l'array universale (NON dimmato)
         self.universo_attivo.set_valore_fixture(fixture_instance, indice_canale, valore)
+        
+        # 2. [NUOVO] Applica il Master Dimmer e invia DMX
+        self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
         
         self.aggiorna_simulazione_luce(fixture_instance)
         
@@ -325,6 +423,11 @@ class FixtureControlMixin:
         # Dimmer Factor (scalato da 0.0 a 1.0)
         dimmer_fattore = max_dimmer_val / 255.0
         
+        # [MODIFICATO] AGGIUNTA del fattore Master Dimmer
+        master_fattore = getattr(self, 'master_dimmer_value', 255) / 255.0
+        
+        dimmer_fattore *= master_fattore
+
         # Applicazione del Dimmer
         final_r = final_r_raw * dimmer_fattore
         final_g = final_g_raw * dimmer_fattore
@@ -397,6 +500,9 @@ class FixtureControlMixin:
             if self.stage_view:
                  self.stage_view.clear_and_repopulate(u_stato.istanze_stato) 
                  
+            # [MODIFICATO] Applica il Master Dimmer prima di inviare
+            self.universo_attivo.aggiorna_canali_universali()
+            self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
             self.dmx_comm.send_dmx_packet(self.universo_attivo.array_canali)
             
         except ValueError as e:
@@ -419,6 +525,8 @@ class FixtureControlMixin:
              return
         
         fixture_to_remove = self.universo_attivo.fixture_assegnate.pop(index_to_remove)
+        
+        # Rigenera l'array universale (non dimmato)
         self.universo_attivo.aggiorna_canali_universali()
         
         u_stato = next((u for u in self.progetto.universi_stato if u.id_universo == self.universo_attivo.id_universo))
@@ -434,6 +542,8 @@ class FixtureControlMixin:
         if self.stage_view:
             self.stage_view.clear_and_repopulate(u_stato.istanze_stato)
         
+        # [MODIFICATO] Applica il Master Dimmer prima di inviare
+        self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
         self.dmx_comm.send_dmx_packet(self.universo_attivo.array_canali)
         
         QMessageBox.information(self, "Rimozione", f"Fixture '{fixture_to_remove.modello.nome}' (DMX {addr_to_remove}) rimossa con successo.")
