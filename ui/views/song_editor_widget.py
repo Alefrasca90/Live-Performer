@@ -548,6 +548,10 @@ class SongEditorWidget(QWidget):
             
             port_to_save = INTERNAL_DMX_PORT if port_name_selected == "Solo DMX Interno (Nessun Output MIDI)" else port_name_selected
             
+            # [NUOVO] FERMA LA RIPRODUZIONE PRIMA DI MODIFICARE LE TRACCE IN MEMORIA
+            if self.audio_engine.playing_song == self.song_name or self.midi_engine.playing:
+                self.stop_playback() 
+                
             # 3. Aggiorna DataManager (add_midi_track ora si occupa della copia del file)
             self.data_manager.add_midi_track(self.song_name, next_channel, port_to_save, file_path=file_path)
             self.load_song()
@@ -560,6 +564,11 @@ class SongEditorWidget(QWidget):
         """Rimuove la traccia MIDI selezionata."""
         current = self.midi_list.currentRow()
         if current >= 0:
+            
+            # [NUOVO] FERMA LA RIPRODUZIONE PRIMA DI MODIFICARE LE TRACCE IN MEMORIA
+            if self.audio_engine.playing_song == self.song_name or self.midi_engine.playing:
+                self.stop_playback() 
+
             self.data_manager.remove_midi_track(self.song_name, current)
             self.midi_engine.remove_track(self.song_name, current)
             self.load_song()
@@ -623,6 +632,10 @@ class SongEditorWidget(QWidget):
         if ok_channel and new_channel_str:
             new_channel = int(new_channel_str)
             
+            # [NUOVO] FERMA LA RIPRODUZIONE PRIMA DI MODIFICARE LE TRACCE IN MEMORIA
+            if self.audio_engine.playing_song == self.song_name or self.midi_engine.playing:
+                self.stop_playback() 
+
             # 3. Aggiorna DataManager e MidiEngine
             self.data_manager.update_midi_track_output(
                 self.song_name, 

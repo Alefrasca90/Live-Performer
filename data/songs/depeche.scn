@@ -11,12 +11,12 @@
   ],
   "midi_tracks": [
     {
-      "file": "C:/Users/Alessandro/Music/midi test.mid",
+      "file": "C:/Users/Alessandro/Music/midi test with CC.mid",
       "channel": 1,
       "port": "INTERNAL_DMX_PORT_TRIGGER"
     }
   ],
-  "video_file": "C:\\Users\\Alessandro\\Documents\\GitHub\\Live-Performer\\data\\songs\\depeche\\Blue Orchid.mp4",
+  "video_file": null,
   "lyrics": [
     {
       "line": "Reach out, touch faith",

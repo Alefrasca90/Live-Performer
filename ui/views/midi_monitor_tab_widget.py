@@ -1,3 +1,5 @@
+# ui/views/midi_monitor_tab_widget.py
+
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QSplitter, QGroupBox
 from PyQt6.QtCore import Qt
 
@@ -53,7 +55,8 @@ class MidiMonitorTabWidget(QWidget):
     def _log_midi_input_message(self, msg):
         """Formatta e aggiunge il messaggio MIDI IN dalla sorgente hardware."""
         log_text = ""
-        channel_display = getattr(msg, 'channel', -1) + 1
+        # mido usa channel 0-15
+        channel_display = getattr(msg, 'channel', -1) + 1 
 
         if msg.type == 'note_on' and msg.velocity > 0:
             log_text = f"嫉 ON | CH {channel_display:02} | Note {msg.note:03} | Vel {msg.velocity:03} [HARDWARE]"
@@ -63,7 +66,7 @@ class MidiMonitorTabWidget(QWidget):
             if msg.control == 121 or msg.control == 123:
                  log_text = f"字 CC | CH {channel_display:02} | Num {msg.control:03} | Val {msg.value:03} [DRIVER RESET]"
             else:
-                 log_text = f"字 CC | CH {channel_display:02} | Num {msg.control:03} | Val {msg.value:03} [HARDWARE]"
+                 log_text = f"字 CC | CH {channel_display:02} | Num {msg.control:03} | Val {msg.value:03} [HARDWARE]" 
         elif msg.type == 'program_change':
             log_text = f"朕 PC | CH {channel_display:02} | Num {msg.program + 1:03} [HARDWARE]"
         else:

@@ -138,7 +138,8 @@ class MidiMappingDialog(QDialog):
 
         # Colonna 3: Azione (ComboBox)
         combo_action = QComboBox()
-        combo_action.addItems(['stop', 'scene', 'chaser'])
+        # MODIFICATO: Aggiunta l'azione 'master_dimmer'
+        combo_action.addItems(['stop', 'scene', 'chaser', 'master_dimmer'])
         self.table.setCellWidget(row, 3, combo_action)
         
         # Colonna 4: Target (ComboBox)
@@ -150,6 +151,9 @@ class MidiMappingDialog(QDialog):
             target_options.extend([f"Scena: {s.nome}" for s in self.scene_list])
         if self.chaser_list:
             target_options.extend([f"Chaser: {c.nome}" for c in self.chaser_list])
+        
+        # MODIFICATO: Aggiunta l'opzione Master Dimmer come target
+        combo_target.addItem("Master Dimmer") 
         
         combo_target.addItems(target_options)
         self.table.setCellWidget(row, 4, combo_target)
@@ -170,6 +174,9 @@ class MidiMappingDialog(QDialog):
             # Cerca il target corretto
             if mapping.action_type == 'stop':
                  combo_target.setCurrentIndex(0) # Deve essere "-"
+            # MODIFICATO: Gestisce il caricamento del Master Dimmer
+            elif mapping.action_type == 'master_dimmer':
+                 combo_target.setCurrentText("Master Dimmer")
             elif mapping.action_type == 'scene':
                  try:
                     target_name = self.scene_list[mapping.action_index].nome
@@ -215,7 +222,7 @@ class MidiMappingDialog(QDialog):
                 spin_value = self.table.cellWidget(row, 2)
                 combo_action = self.table.cellWidget(row, 3)
                 combo_target = self.table.cellWidget(row, 4)
-                chk_internal = self.table.cellWidget(row, 5) # NUOVO WIDGET
+                chk_internal = self.table.cellWidget(row, 5) 
 
                 # Estrazione dei valori
                 midi_type = combo_type.currentText()
@@ -224,14 +231,14 @@ class MidiMappingDialog(QDialog):
                 action_type = combo_action.currentText()
                 target_text = combo_target.currentText()
                 
-                internal_only = chk_internal.isChecked() if chk_internal else False # NUOVO VALORE
+                internal_only = chk_internal.isChecked() if chk_internal else False 
 
                 action_index = -1 
 
                 # Validazione Target (Scena/Chaser)
                 if action_type == 'scene' or action_type == 'chaser':
-                    if target_text == "-":
-                        QMessageBox.warning(self, "Errore Mappatura", f"Il Passo {row+1} con Azione '{action_type}' deve avere un Target valido.")
+                    if target_text == "-" or target_text == "Master Dimmer":
+                        QMessageBox.warning(self, "Errore Mappatura", f"Il Passo {row+1} con Azione '{action_type}' deve avere un Target Scena/Chaser valido.")
                         return
 
                     target_name = target_text.split(": ")[1]
@@ -246,10 +253,20 @@ class MidiMappingDialog(QDialog):
                              return
                         action_index = chaser_names.index(target_name)
                 
+                # NUOVO: Validazione Master Dimmer
+                elif action_type == 'master_dimmer':
+                    if target_text != "Master Dimmer":
+                         QMessageBox.warning(self, "Errore Mappatura", f"L'Azione 'Master Dimmer' deve avere Target 'Master Dimmer' (Passo {row+1}).")
+                         return
+                    if midi_type != 'cc' and midi_type != 'note':
+                        QMessageBox.warning(self, "Errore Mappatura", f"L'Azione 'Master Dimmer' deve usare Tipo MIDI 'cc' o 'note' per il controllo fader (Passo {row+1}).")
+                        return
+                    action_index = -2 # Indice fittizio per Master Dimmer
+                    
                 # Validazione Stop
                 elif action_type == 'stop':
                     if midi_type == 'note' and value == 0:
-                        QMessageBox.warning(self, "Errore Mappatura", f"Lo Stop con Note On deve avere un Valore Soglia > 0.")
+                        QMessageBox.warning(self, "Errore Mappatura", f"Lo Stop con Note On deve avere un Valore Soglia > 0 (Passo {row+1}).")
                         return
                     action_index = -1 
 
@@ -259,7 +276,7 @@ class MidiMappingDialog(QDialog):
                     value=value, 
                     action_type=action_type, 
                     action_index=action_index,
-                    internal_only=internal_only # AGGIUNTO
+                    internal_only=internal_only 
                 ))
 
             except Exception as e:

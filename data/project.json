@@ -470,6 +470,14 @@
                     "action_type": "scene",
                     "action_index": 2,
                     "internal_only": true
+                },
+                {
+                    "midi_type": "cc",
+                    "midi_number": 7,
+                    "value": 0,
+                    "action_type": "master_dimmer",
+                    "action_index": -2,
+                    "internal_only": true
                 }
             ],
             "midi_channel": 0,

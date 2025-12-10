@@ -2,10 +2,11 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QMessageBox, QSpinBox, QSizePolicy, QSlider, QGroupBox,
-    QSpacerItem, QPushButton # AGGIUNTO QPushButton
+    QMessageBox, QSpinBox, QSizePolicy, QSlider, 
+    QSpacerItem, QPushButton, QGroupBox # AGGIUNTO QGroupBox per Master Dimmer
 )
 from PyQt6.QtCore import Qt, QTimer
+import threading # NUOVO: Import per il threading
 # Import Core Models
 from core.dmx_models import IstanzaFixture, FixtureModello
 from core.project_models import IstanzaFixtureStato 
@@ -42,7 +43,7 @@ class FixtureControlMixin:
         self.master_dimmer_value = value
         
         # 1. L'universo DMX deve essere prima aggiornato dai valori NON dimmati
-        # (Questo è implicito se il valore è stato modificato solo dal Master Dimmer)
+        # Questo è implicito se il valore è stato modificato solo dal Master Dimmer.
         self.universo_attivo.aggiorna_canali_universali()
         
         # 2. Ottieni l'array dimmato dal Master Dimmer
@@ -51,24 +52,41 @@ class FixtureControlMixin:
         # 3. Sostituisci l'array nell'universo DMX (questo valore è quello che verrà inviato)
         self.universo_attivo.array_canali = dimmed_array
 
-        # 4. Aggiorna UI e invia il pacchetto DMX
-        self.dmx_comm.send_dmx_packet(self.universo_attivo.array_canali)
+        # 4. [MODIFICATO - THREADING] Invia il pacchetto DMX in un thread separato
+        # Copia l'array DMX per il thread e avvia l'invio DMX (non bloccante)
+        dmx_data_copy = self.universo_attivo.array_canali[:]
+        threading.Thread(target=self.dmx_comm.send_dmx_packet, args=(dmx_data_copy,)).start()
         
-        # 5. Aggiorna la simulazione luce e i fader UI (che leggono i valori dimmati dal nuovo array)
+        # 5. Aggiorna la simulazione luce e i fader UI (queste operazioni devono restare nel main thread)
         self._push_dmx_to_instances()
         for instance in self.universo_attivo.fixture_assegnate:
              self.aggiorna_simulazione_luce(instance)
         self._aggiorna_valori_fader()
         
-        
+    def _send_debounced_dimmer_update(self, value: int):
+        """Metodo di supporto per debouncing il Master Dimmer DMX send."""
+        # Se il timer non è stato inizializzato, lo fa ora (nel caso estremo)
+        if not hasattr(self, '_master_dimmer_debounce_timer'):
+             return
+
+        # Memorizza l'ultimo valore e riavvia il timer
+        self._master_dimmer_value_to_send = value
+        if not self._master_dimmer_debounce_timer.isActive():
+            # Il timer chiama _apply_master_dimmer, che ora usa un thread per l'I/O
+            self._master_dimmer_debounce_timer.start()
+
+
     def _gestisci_cambio_valore_master_dmx(self, value: int, label_widget: QLabel):
         """Gestisce la modifica del Master Dimmer da parte dell'utente."""
         if self.chaser_timer.isActive():
             self._ferma_chaser(show_message=False)
             QTimer.singleShot(10, lambda: QMessageBox.information(self, "Controllo Manuale", "Chaser interrotto per controllo manuale."))
             
+        # Aggiornamento immediato della UI (Label)
         label_widget.setText(f"Dimmer Master: {value}")
-        self._apply_master_dimmer(value)
+        
+        # Lancia l'aggiornamento DMX in modalità debounced
+        self._send_debounced_dimmer_update(value)
         
 
     def popola_controlli_fader(self):
@@ -81,6 +99,17 @@ class FixtureControlMixin:
         # [NUOVO] Inizializza il Master Dimmer se non esiste (default 255 = 100%)
         if not hasattr(self, 'master_dimmer_value'):
              self.master_dimmer_value = 255
+        
+        # [NUOVO] Inizializza il debouncing timer e la variabile di stato
+        if not hasattr(self, '_master_dimmer_value_to_send'):
+             self._master_dimmer_value_to_send = self.master_dimmer_value
+
+        if not hasattr(self, '_master_dimmer_debounce_timer'):
+            self._master_dimmer_debounce_timer = QTimer(self)
+            self._master_dimmer_debounce_timer.setSingleShot(True)
+            self._master_dimmer_debounce_timer.setInterval(20) # 20ms debounce (50 FPS rate)
+            # Connetti il timer al metodo che esegue l'aggiornamento completo
+            self._master_dimmer_debounce_timer.timeout.connect(lambda: self._apply_master_dimmer(self._master_dimmer_value_to_send))
         
         # Pulizia del layout
         # 'self.fader_layout' must exist, ensured in _setup_ui
@@ -241,15 +270,18 @@ class FixtureControlMixin:
             # 1. Aggiorna l'universo DMX (non dimmato)
             self.universo_attivo.aggiorna_canali_universali()
             
-            # 2. [NUOVO] Applica il Master Dimmer e invia DMX
+            # 2. Applica il Master Dimmer
             self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
-            self.dmx_comm.send_dmx_packet(self.universo_attivo.array_canali)
             
-            # 3. Aggiorna UI e Stage View
+            # 3. [MODIFICATO] Invia DMX in un thread separato
+            dmx_data_copy = self.universo_attivo.array_canali[:]
+            threading.Thread(target=self.dmx_comm.send_dmx_packet, args=(dmx_data_copy,)).start()
+            
+            # 4. Aggiorna UI e Stage View
             self._aggiorna_valori_fader()
             self.aggiorna_simulazione_luce(target_instance)
             
-            # 4. Mostra successo
+            # 5. Mostra successo
             QMessageBox.information(self, 
                                     "Incolla Effettuato", 
                                     f"Incollati {pasted_count} di {copied_count} valori in '{target_instance.modello.nome}' ({target_instance.indirizzo_inizio}).")
@@ -346,13 +378,14 @@ class FixtureControlMixin:
         # 1. Imposta il valore sul modello e aggiorna l'array universale (NON dimmato)
         self.universo_attivo.set_valore_fixture(fixture_instance, indice_canale, valore)
         
-        # 2. [NUOVO] Applica il Master Dimmer e invia DMX
+        # 2. Applica il Master Dimmer
         self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
         
         self.aggiorna_simulazione_luce(fixture_instance)
         
-        # 'self.dmx_comm' must exist, ensured in MainWindow.__init__
-        self.dmx_comm.send_dmx_packet(self.universo_attivo.array_canali)
+        # 3. [MODIFICATO] Invia DMX in un thread separato
+        dmx_data_copy = self.universo_attivo.array_canali[:]
+        threading.Thread(target=self.dmx_comm.send_dmx_packet, args=(dmx_data_copy,)).start()
 
     def aggiorna_simulazione_luce(self, instance: IstanzaFixture):
         """
@@ -500,10 +533,13 @@ class FixtureControlMixin:
             if self.stage_view:
                  self.stage_view.clear_and_repopulate(u_stato.istanze_stato) 
                  
-            # [MODIFICATO] Applica il Master Dimmer prima di inviare
+            # Applica il Master Dimmer prima di inviare
             self.universo_attivo.aggiorna_canali_universali()
             self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
-            self.dmx_comm.send_dmx_packet(self.universo_attivo.array_canali)
+            
+            # [MODIFICATO] Invia DMX in un thread separato
+            dmx_data_copy = self.universo_attivo.array_canali[:]
+            threading.Thread(target=self.dmx_comm.send_dmx_packet, args=(dmx_data_copy,)).start()
             
         except ValueError as e:
             QMessageBox.critical(self, "Errore di Assegnazione", str(e))
@@ -542,8 +578,11 @@ class FixtureControlMixin:
         if self.stage_view:
             self.stage_view.clear_and_repopulate(u_stato.istanze_stato)
         
-        # [MODIFICATO] Applica il Master Dimmer prima di inviare
+        # Applica il Master Dimmer prima di inviare
         self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
-        self.dmx_comm.send_dmx_packet(self.universo_attivo.array_canali)
+        
+        # [MODIFICATO] Invia DMX in un thread separato
+        dmx_data_copy = self.universo_attivo.array_canali[:]
+        threading.Thread(target=self.dmx_comm.send_dmx_packet, args=(dmx_data_copy,)).start()
         
         QMessageBox.information(self, "Rimozione", f"Fixture '{fixture_to_remove.modello.nome}' (DMX {addr_to_remove}) rimossa con successo.")

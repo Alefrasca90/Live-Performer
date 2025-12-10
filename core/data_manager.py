@@ -320,20 +320,35 @@ class DataManager:
 
     def save_song(self, name, data=None):
         """Salva lo stato corrente della canzone sul file .scn."""
+        path = os.path.join(self.songs_dir, f"{name}{self.song_extension}")
+
         if data is None:
-            # Recuperiamo i dati completi, inclusi lyrics_txt e video_file, per non perderli
-            current_data = self.load_song(name) 
             
+            # --- FIX: Evita l'auto-sovrascrittura della cache (self.midi_tracks) ---
+            # 1. Ottieni i metadati non gestiti dalla cache (video_file, lyrics_txt)
+            current_metadata = {}
+            if os.path.exists(path):
+                 with open(path, "r", encoding="utf-8") as f:
+                     try:
+                         # Non vogliamo chiamare load_song qui, quindi leggiamo solo i metadati dal file
+                         file_content = json.load(f)
+                         current_metadata["video_file"] = file_content.get("video_file", None)
+                         current_metadata["lyrics_txt"] = file_content.get("lyrics_txt", None)
+                     except json.JSONDecodeError:
+                          pass
+
+            # 2. Ricostruisci il dizionario "data" usando la cache in-memory aggiornata 
+            #    e i metadati appena letti dal disco.
             data = {
                 "name": name,
-                "audio_tracks": self.audio_tracks.get(name, []),
-                "midi_tracks": self.midi_tracks.get(name, []),
-                "video_file": current_data.get("video_file", None) if current_data else None,
-                "lyrics": self.lyrics.get(name, []),
-                "lyrics_txt": self.get_lyrics_txt_file(name)
+                "audio_tracks": self.audio_tracks.get(name, []), 
+                "midi_tracks": self.midi_tracks.get(name, []),   
+                "video_file": current_metadata.get("video_file", None),
+                "lyrics": self.lyrics.get(name, []),              
+                "lyrics_txt": current_metadata.get("lyrics_txt", None)
             }
-        path = os.path.join(self.songs_dir, f"{name}{self.song_extension}")
         
+        # [ORIGINAL CODE - UPDATE CACHE IF 'data' ARGUMENT IS PROVIDED]
         if "audio_tracks" in data:
             self.audio_tracks[name] = data["audio_tracks"]
         if "midi_tracks" in data:

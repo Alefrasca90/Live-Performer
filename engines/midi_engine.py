@@ -1,3 +1,5 @@
+# engines/midi_engine.py
+
 from PyQt6.QtCore import QObject, pyqtSignal
 import mido
 import threading
@@ -334,9 +336,14 @@ class MidiEngine(QObject):
         # 1. Gestione MIDI Clock
         if self.midi_clock_running:
              self.midi_clock_running = False 
+             if self.clock_thread and self.clock_thread.is_alive():
+                 self.clock_thread.join(timeout=0.1) # [MODIFICATO] Aggiunto join
         self.clock_thread = None
 
         # 2. Gestione Playback File MIDI
         self.playback_running = False
-        # Assicurati che i thread terminino (gestito da self.playback_running = False nel thread)
-        self.playback_threads[song_name] = []
+        if song_name in self.playback_threads:
+            for t in self.playback_threads[song_name]:
+                 if t.is_alive():
+                      t.join(timeout=0.1) # [MODIFICATO] Aggiunto join
+            self.playback_threads[song_name] = []

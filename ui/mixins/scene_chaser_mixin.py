@@ -5,6 +5,7 @@ from PyQt6.QtCore import QTimer
 from core.dmx_models import Scena, PassoChaser, Chaser
 from core.project_models import UniversoStato
 import time 
+import threading # NUOVO: Import per il threading
 
 # Frequenza del timer di fade (in Hz)
 FADE_RATE_HZ = 100 
@@ -41,13 +42,15 @@ class SceneChaserMixin:
             # 2. Applica la scena (non dimmata)
             self.universo_attivo.applica_scena(scena_da_applicare)
             
-            # 3. [NUOVO] Applica il Master Dimmer e invia DMX
+            # 3. [NUOVO] Applica il Master Dimmer
             if hasattr(self, '_apply_master_dimmer_to_array_only'): # Assicura che il mixin FixtureControlMixin sia presente
                  self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
 
-            self.dmx_comm.send_dmx_packet(self.universo_attivo.array_canali)
+            # 4. [MODIFICATO - THREADING] Invia DMX in un thread separato
+            dmx_data_copy = self.universo_attivo.array_canali[:]
+            threading.Thread(target=self.dmx_comm.send_dmx_packet, args=(dmx_data_copy,)).start()
             
-            # 4. Aggiorna UI (legge i valori dimmati)
+            # 5. Aggiorna UI (legge i valori dimmati)
             self._aggiorna_ui_fader_e_stage()
         else:
              print(f"MIDI Error: Indice scena {index} fuori limite.")
@@ -127,13 +130,15 @@ class SceneChaserMixin:
         # 2. APPLY SCENE (NON dimmata)
         self.universo_attivo.applica_scena(scena_da_applicare)
         
-        # 3. [NUOVO] Applica il Master Dimmer e invia DMX
+        # 3. [NUOVO] Applica il Master Dimmer
         if hasattr(self, '_apply_master_dimmer_to_array_only'):
              self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
 
-        self.dmx_comm.send_dmx_packet(self.universo_attivo.array_canali)
+        # 4. [MODIFICATO - THREADING] Invia DMX in un thread separato
+        dmx_data_copy = self.universo_attivo.array_canali[:]
+        threading.Thread(target=self.dmx_comm.send_dmx_packet, args=(dmx_data_copy,)).start()
 
-        # 4. UI UPDATES
+        # 5. UI UPDATES
         def update_ui_and_show_message():
             self._aggiorna_ui_fader_e_stage()
             QMessageBox.information(self, "Scena Applicata", f"Scena '{scena_da_applicare.nome}' applicata.")
@@ -295,15 +300,17 @@ class SceneChaserMixin:
                 # 2. Nessun Fade In, applicazione istantanea (NON dimmata)
                 self.universo_attivo.applica_scena(passo.scena)
                 
-                # 3. [NUOVO] Applica il Master Dimmer e invia DMX
+                # 3. [NUOVO] Applica il Master Dimmer
                 if hasattr(self, '_apply_master_dimmer_to_array_only'):
                      self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
-                     
+                
+                # 4. [MODIFICATO - THREADING] Invia DMX in un thread separato
+                dmx_data_copy = self.universo_attivo.array_canali[:]
+                threading.Thread(target=self.dmx_comm.send_dmx_packet, args=(dmx_data_copy,)).start()
+
                 self._aggiorna_ui_fader_e_stage() # <--- Aggiorna UI, usa l'array dimmato
-                self.dmx_comm.send_dmx_packet(self.universo_attivo.array_canali)
 
-
-                # 4. Imposta Hold Time
+                # 5. Imposta Hold Time
                 tempo_totale_ms = int(passo.tempo_permanenza * 1000)
                 if tempo_totale_ms > 0:
                      self.chaser_timer.setInterval(tempo_totale_ms) 
@@ -324,12 +331,15 @@ class SceneChaserMixin:
         if fade_time <= 0.0:
             self.universo_attivo.applica_scena(target_scena)
             
-            # [NUOVO] Applica il Master Dimmer e invia DMX
+            # [NUOVO] Applica il Master Dimmer
             if hasattr(self, '_apply_master_dimmer_to_array_only'):
                  self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
 
+            # [MODIFICATO - THREADING] Invia DMX in un thread separato
+            dmx_data_copy = self.universo_attivo.array_canali[:]
+            threading.Thread(target=self.dmx_comm.send_dmx_packet, args=(dmx_data_copy,)).start()
+
             self._aggiorna_ui_fader_e_stage()
-            self.dmx_comm.send_dmx_packet(self.universo_attivo.array_canali)
             return
         
         # 1. Prepara i valori di partenza (valori attuali, potenzialmente già dimmati)
@@ -384,9 +394,12 @@ class SceneChaserMixin:
         # 2. Aggiornamento DMX
         self.universo_attivo.array_canali = new_dmx_array
         self._aggiorna_ui_fader_e_stage() 
-        self.dmx_comm.send_dmx_packet(self.universo_attivo.array_canali)
         
-        # 3. Controllo Fine Fade
+        # 3. [MODIFICATO - THREADING] Invia DMX in un thread separato
+        dmx_data_copy = self.universo_attivo.array_canali[:]
+        threading.Thread(target=self.dmx_comm.send_dmx_packet, args=(dmx_data_copy,)).start()
+        
+        # 4. Controllo Fine Fade
         if progress >= 1.0:
             self.fade_timer.stop()
             self._FADE_DATA.clear()

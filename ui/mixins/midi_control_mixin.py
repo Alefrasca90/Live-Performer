@@ -95,23 +95,7 @@ class MIDIControlMixin:
         else:
             return 
 
-        # 2. [NUOVO] GESTIONE MASTER DIMMER TRAMITE CC DEDICATO (CC 100)
-        # Deve avvenire prima della ricerca delle mappature salvate.
-        if midi_type == 'control_change' and midi_number == 100:
-             if hasattr(self, '_apply_master_dimmer'):
-                  # Mappa il valore CC (0-127) a DMX (0-255)
-                  dmx_value = int(value * (255 / 127))
-                  
-                  # Uso l'helper per applicare e aggiornare tutto (UI/DMX/simulazione)
-                  self._apply_master_dimmer(dmx_value)
-                  
-                  # Aggiorna il label del fader Master Dimmer (solo se visibile)
-                  if hasattr(self, 'master_label'):
-                       self.master_label.setText(f"Dimmer Master: {dmx_value}")
-
-                  return # Messaggio consumato
-                  
-        # 3. Ricerca della mappatura
+        # 2. Ricerca della mappatura
         for mapping in self.midi_mappings:
             is_match = False
             
@@ -135,7 +119,22 @@ class MIDIControlMixin:
             # --- Esecuzione Azione ---
             if is_match:
                 
-                # [NUOVO] Ignora le mappature "internal_only" se il messaggio NON è del tipo interno.
+                # [NUOVO] GESTIONE MASTER DIMMER
+                if mapping.action_type == 'master_dimmer':
+                     # Mappa il valore MIDI (0-127) a DMX (0-255)
+                     dmx_value = int(value * (255 / 127))
+                     
+                     if hasattr(self, '_send_debounced_dimmer_update'):
+                          # 1. Aggiornamento immediato della UI (Label)
+                          if hasattr(self, 'master_label'):
+                               self.master_label.setText(f"Dimmer Master: {dmx_value}")
+
+                          # 2. Invia l'aggiornamento DMX in modalità debounced
+                          self._send_debounced_dimmer_update(dmx_value)
+
+                     return # Messaggio consumato, non continua
+
+                # [ESISTENTE] Ignora le mappature "internal_only" se il messaggio NON è del tipo interno.
                 if mapping.internal_only and not is_internal_dmx_trigger:
                      continue
                 
