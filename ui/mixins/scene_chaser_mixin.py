@@ -1,4 +1,4 @@
-# ui/mixins/scene_chaser_mixin.py (COMPLETO E AGGIORNATO per modifica scena e rimozione fader)
+# ui/mixins/scene_chaser_mixin.py (COMPLETO E AGGIORNATO per click singolo/doppio)
 
 from PyQt6.QtWidgets import QMessageBox 
 from PyQt6.QtCore import QTimer, Qt
@@ -126,13 +126,24 @@ class SceneChaserMixin:
             self._update_active_scenes_ui()
             self._merge_and_send_dmx()
             
-    # [RIMOSSO _update_active_scene_master, la logica master è sul fader generale]
-            
     def _merge_and_send_dmx(self):
-        """Metodo per chiamare la fusione HTP e inviare DMX. [NUOVO]"""
-        if hasattr(self, '_merge_active_scenes'): # Implementato in FixtureControlMixin
-             self._merge_active_scenes(self.active_scenes)
-             self._save_active_scenes()
+        """Metodo per chiamare la fusione HTP, inviare DMX e aggiornare la UI. [MODIFICATO]"""
+        if not hasattr(self, '_merge_active_scenes'):
+             print("ERRORE: _merge_active_scenes non disponibile. Impossibile fondere le scene.")
+             return
+             
+        # 1. Fondi le scene attive (i valori DMX vengono scritti in universo_attivo.array_canali)
+        self._merge_active_scenes(self.active_scenes)
+        
+        # 2. Aggiorna UI (Fader e Stage View)
+        self._aggiorna_ui_fader_e_stage() 
+
+        # 3. Invia DMX in un thread separato
+        dmx_data_copy = self.universo_attivo.array_canali[:]
+        threading.Thread(target=self.dmx_comm.send_dmx_packet, args=(dmx_data_copy,)).start()
+             
+        self._save_active_scenes()
+
 
     def _save_active_scenes(self):
         """Serializza le scene attive nello stato del progetto. [NUOVO]"""
@@ -216,6 +227,39 @@ class SceneChaserMixin:
 
     # --- Scene Logic ---
 
+    def _view_scene_for_editing(self, scena: Scena):
+        """[NUOVO] Applica la scena direttamente ai fader e aggiorna la UI, svuotando le scene attive.
+           Usato per 'vedere' il contenuto di una scena prima di modificarla."""
+        
+        # 1. Ferma eventuali Chaser
+        if self.chaser_attivo:
+            self._ferma_chaser(show_message=False)
+            
+        # 2. Svuota il Programmer (Active Scenes)
+        self.active_scenes.clear()
+        self._update_active_scenes_ui() 
+        self._save_active_scenes() # Persist the cleared state
+        
+        # 3. Applica la scena direttamente ai valori correnti della fixture
+        self.universo_attivo.applica_scena(scena) 
+
+        # 4. Inizia il ciclo di aggiornamento DMX/UI
+        self.universo_attivo.aggiorna_canali_universali()
+        
+        # 5. Applica il Master Dimmer
+        if hasattr(self, '_apply_master_dimmer_to_array_only'):
+             self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
+        
+        # 6. Aggiorna UI (Fader e Stage View)
+        self._aggiorna_ui_fader_e_stage() 
+        
+        # 7. Invia DMX
+        dmx_data_copy = self.universo_attivo.array_canali[:]
+        threading.Thread(target=self.dmx_comm.send_dmx_packet, args=(dmx_data_copy,)).start()
+        
+        self.setWindowTitle(f"DMX Controller - Scena Caricata per Modifica: {scena.nome}")
+        
+
     def _cattura_scena_corrente(self):
         """
         Crea una nuova Scena dallo stato corrente e la salva,
@@ -261,18 +305,36 @@ class SceneChaserMixin:
         
         QTimer.singleShot(10, lambda: QMessageBox.information(self, "Scena Salvata", message))
 
-        
-    def _update_scene_list_ui(self):
-        """Aggiorna la QListWidget che mostra le scene salvate."""
+    # [NUOVO METODO] Handle single click per l'attivazione/layering
+    def _handle_scene_single_click_for_activation(self, item):
+        """
+        Gestisce il click singolo sulla lista scene.
+        Aggiunge la scena selezionata allo stack 'Active Scenes' (Programmer)
+        per il Layering.
+        """
         if not hasattr(self, 'scene_list_widget'):
             return
             
-        self.scene_list_widget.clear()
-        for s in self.scene_list:
-            self.scene_list_widget.addItem(f"{s.nome} ({len(s.valori_canali)}ch)")
+        # Trova l'indice dall'oggetto QListWidgetItem cliccato
+        index = self.scene_list_widget.row(item)
+        
+        if index < 0 or index >= len(self.scene_list):
+            return
 
-    def _applica_scena_selezionata(self):
-        """Aggiunge la scena selezionata nel QListWidget alla lista delle scene attive. [MODIFICATO]"""
+        scena_da_applicare = self.scene_list[index]
+        
+        # Chiama il metodo di aggiunta allo stack Active Scenes (Layering)
+        self._add_scene_to_active(scena_da_applicare, master_value=255)
+        
+        # Rimosso il QMessageBox per evitare interruzioni continue
+        print(f"Scena '{scena_da_applicare.nome}' aggiunta al Programmer.")
+
+
+    def _handle_scene_double_click_for_editing(self):
+        """
+        [MODIFICATO] Carica la scena selezionata nei fader per la visualizzazione/modifica.
+        (Questa funzione gestisce il segnale doubleClicked).
+        """
         if not hasattr(self, 'scene_list_widget'):
             return
             
@@ -283,13 +345,22 @@ class SceneChaserMixin:
         index = self.scene_list_widget.row(selected_items[0])
         scena_da_applicare = self.scene_list[index]
         
-        # Chiamata al metodo con valore Master fisso (255)
-        self._add_scene_to_active(scena_da_applicare, master_value=255)
+        # Chiama la logica per caricare la scena nei fader
+        self._view_scene_for_editing(scena_da_applicare)
         
-        # L'aggiornamento UI e DMX è gestito da _add_scene_to_active (via _merge_and_send_dmx)
-        QTimer.singleShot(10, lambda: QMessageBox.information(self, "Scena Aggiunta", f"Scena '{scena_da_applicare.nome}' aggiunta al Programmer."))
+        QTimer.singleShot(10, lambda: QMessageBox.information(self, "Scena Caricata", f"Scena '{scena_da_applicare.nome}' caricata nei fader per la modifica. Sovrascrivi cliccando 'Salva'."))
 
-        
+
+    def _update_scene_list_ui(self):
+        """Aggiorna la QListWidget che mostra le scene salvate."""
+        if not hasattr(self, 'scene_list_widget'):
+            return
+            
+        self.scene_list_widget.clear()
+        for s in self.scene_list:
+            self.scene_list_widget.addItem(f"{s.nome} ({len(s.valori_canali)}ch)")
+
+    
     def _cancella_scena_selezionata(self):
         """Cancella la scena selezionata."""
         if not hasattr(self, 'scene_list_widget'):

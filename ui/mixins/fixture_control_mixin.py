@@ -1,4 +1,4 @@
-# ui/mixins/fixture_control_mixin.py (COMPLETO E AGGIORNATO)
+# ui/mixins/fixture_control_mixin.py (COMPLETO E AGGIORNATO per logica "Blackout su Idle")
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
@@ -56,62 +56,75 @@ class FixtureControlMixin:
 
     def _merge_active_scenes(self, active_scenes: list[ActiveScene]):
         """
-        Fonde tutte le scene attive (utilizzando i loro master) e applica il risultato
-        alla proprietà `fixture.valori_correnti` (che è la sorgente per l'HTP finale). [NUOVO]
+        Fonde tutte le scene attive e applica il risultato.
+        Quando non ci sono scene attive (Idle), l'output DMX viene forzato a 0
+        (Blackout), mantenendo i fader al loro stato di cattura. [MODIFICATO]
         """
-        if not active_scenes:
-            # Se nessuna scena è attiva, l'utente sta lavorando esclusivamente con i fader manuali/midi.
-            return
-            
-        # 1. Calcola la matrice di fusione DMX (512 canali)
-        merged_values_raw = {} # {dmx_addr: valore HTP tra le scene}
+        
+        # 1. SALVA LO STATO CORRENTE DEL PROGRAMMER (FADER)
+        # Questo è lo stato visuale dei fader e il livello che vogliamo salvare per il Capture.
+        saved_programmer_values = {}
+        for instance in self.universo_attivo.fixture_assegnate:
+            saved_programmer_values[instance.indirizzo_inizio] = instance.valori_correnti[:]
+        
+        
+        # 2. CALCOLA IL RISULTATO FUSO DEL SOLO SCENE LAYER (SLR)
+        merged_scene_values = {} # {dmx_addr: value}
         
         for active_scene in active_scenes:
             scene_data = active_scene.scena.valori_canali
             master_factor = active_scene.master_value / 255.0
             
             for dmx_addr, raw_value in scene_data.items():
-                # Applica il Master della scena
                 value_with_master = int(raw_value * master_factor)
                 
-                # Applica HTP tra le scene (e con i valori precedenti)
-                if dmx_addr not in merged_values_raw:
-                    merged_values_raw[dmx_addr] = value_with_master
+                # Applica HTP tra le scene attive
+                if dmx_addr not in merged_scene_values:
+                    merged_scene_values[dmx_addr] = value_with_master
                 else:
-                    merged_values_raw[dmx_addr] = max(merged_values_raw[dmx_addr], value_with_master)
-                    
-        # 2. Applica i valori fusi alle istanze fixture (HTP con Programmer Layer)
+                    merged_scene_values[dmx_addr] = max(merged_scene_values[dmx_addr], value_with_master)
+        
+        
+        # 3. DETERMINA IL VALORE DMX VINCENTE E SOVRASCRIVI TEMPORANEAMENTE fixture.valori_correnti
         
         for instance in self.universo_attivo.fixture_assegnate:
             start_addr, end_addr = instance.get_indirizzi_universali()
+            programmer_state = saved_programmer_values[instance.indirizzo_inizio]
             
             for i in range(instance.modello.numero_canali):
                 dmx_addr = start_addr + i
                 
-                # Valore dalla fusione delle scene
-                scene_value = merged_values_raw.get(dmx_addr, instance.modello.descrizione_canali[i].valore_default)
-
-                # Applica HTP tra Scene (merged) e Programmer (fader manuale / midi fader)
-                current_programmer_value = instance.valori_correnti[i]
+                if active_scenes:
+                    # PLAYBACK MODE: Output = Scene Layer Result (SLR).
+                    # I fader manuali (Programmer State) sono IGNORATI per l'uscita DMX.
+                    scene_value = merged_scene_values.get(dmx_addr, instance.modello.descrizione_canali[i].valore_default)
+                    
+                    # Il layer temporaneo riceve solo il valore della scena
+                    instance.valori_correnti[i] = scene_value 
                 
-                # HTP: Prende il massimo tra la fusione delle scene e il valore manuale (programmer)
-                new_val = max(scene_value, current_programmer_value)
+                else:
+                    # IDLE / BLACKOUT MODE: Se non ci sono scene attive, l'output DMX deve essere 0 (Blackout).
+                    # Forziamo il valore di output al valore di default (tipicamente 0).
+                    
+                    # Ottieni il valore di default del canale (Blackout state)
+                    default_value = instance.modello.descrizione_canali[i].valore_default
+                    
+                    # Il layer temporaneo riceve il valore di Blackout
+                    instance.valori_correnti[i] = default_value
 
-                # Il valore è un raw value che sarà soggetto all'HTP finale di UniversoDMX
-                instance.valori_correnti[i] = new_val
-
-
-        # 3. L'universo DMX applica l'HTP/LTP finale su array_canali (per HTP dimmer e LTP colore/gobo)
+        # 4. Applica l'HTP/LTP DMX finale sull'array universale
         self.universo_attivo.aggiorna_canali_universali()
 
-        # 4. Applica il Master Dimmer globale (MDA)
+        # 5. RIPRISTINA LO STATO VERO DEL PROGRAMMER (FADER)
+        # Questo assicura che i fader mantengano il loro stato di Cattura/Modifica visivamente.
+        for instance in self.universo_attivo.fixture_assegnate:
+            instance.valori_correnti = programmer_state[:]
+
+
+        # 6. Applica il Master Dimmer globale (MDA)
         self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
         
-        # 5. Aggiorna UI e DMX
-        dmx_data_copy = self.universo_attivo.array_canali[:]
-        threading.Thread(target=self.dmx_comm.send_dmx_packet, args=(dmx_data_copy,)).start()
-
-        self._aggiorna_ui_fader_e_stage()
+        # 7. L'aggiornamento UI e DMX è gestito dalla chiamata a _merge_and_send_dmx (nel mixin chiamante).
 
 
     def _apply_master_dimmer_to_array_only(self, dmx_array: list[int]) -> list[int]:
@@ -145,19 +158,13 @@ class FixtureControlMixin:
         self.master_dimmer_value = value
         
         # 1. L'universo DMX deve essere prima aggiornato dai valori NON dimmati (HTP/LTP)
-        self.universo_attivo.aggiorna_canali_universali()
+        # NOTA: Per un corretto aggiornamento in Modalità Edit/Capture, il fader value viene letto
+        # direttamente da _merge_active_scenes/aggiorna_canali_universali.
         
-        # 2. Ottieni l'array dimmato dal Master Dimmer (MDA)
-        dimmed_array = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
+        # 2. Ottieni l'array DMX (già miscelato)
+        self._merge_and_send_dmx() # Chiama la miscelazione completa che applica il Master Dimmer
         
-        # 3. Sostituisci l'array nell'universo DMX (questo valore è quello che verrà inviato)
-        self.universo_attivo.array_canali = dimmed_array
-
-        # 4. [MODIFICATO - THREADING] Invia il pacchetto DMX in un thread separato
-        dmx_data_copy = self.universo_attivo.array_canali[:]
-        threading.Thread(target=self.dmx_comm.send_dmx_packet, args=(dmx_data_copy,)).start()
-        
-        # 5. Aggiorna la simulazione luce e i fader UI (queste operazioni devono restare nel main thread)
+        # 3. Aggiorna la simulazione luce e i fader UI (queste operazioni devono restare nel main thread)
         self._push_dmx_to_instances()
         for instance in self.universo_attivo.fixture_assegnate:
              self.aggiorna_simulazione_luce(instance)

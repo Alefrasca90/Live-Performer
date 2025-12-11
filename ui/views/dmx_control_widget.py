@@ -253,9 +253,15 @@ class DMXControlWidget(QWidget,
         scene_layout.addWidget(QLabel("Cattura Scena Corrente:"))
         scene_layout.addLayout(capture_layout)
         
-        scene_layout.addWidget(QLabel("\nScene Salvate (Doppio Click per Aggiungere):"))
+        # MODIFICATO: Etichetta e Connessioni per Click Singolo/Doppio
+        scene_layout.addWidget(QLabel("\nScene Salvate (Doppio Click per Modifica / Click Singolo per Layering):"))
         self.scene_list_widget = QListWidget() 
-        self.scene_list_widget.doubleClicked.connect(self._applica_scena_selezionata) 
+        
+        # CONNESSIONE: Click Singolo -> Layering (aggiunge allo stack)
+        self.scene_list_widget.itemClicked.connect(self._handle_scene_single_click_for_activation)
+        # CONNESSIONE: Doppio Click -> Edit/View (carica nei fader)
+        self.scene_list_widget.doubleClicked.connect(self._handle_scene_double_click_for_editing) 
+        
         scene_layout.addWidget(self.scene_list_widget, 1) # Stretch 1 for QListWidget
         
         scene_list_ctrl = QHBoxLayout()
