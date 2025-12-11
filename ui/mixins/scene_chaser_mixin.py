@@ -1,4 +1,4 @@
-# ui/mixins/scene_chaser_mixin.py (COMPLETO E AGGIORNATO per gestione MIDI e Scene Multiple)
+# ui/mixins/scene_chaser_mixin.py (COMPLETO E AGGIORNATO per modifica scena e rimozione fader)
 
 from PyQt6.QtWidgets import QMessageBox 
 from PyQt6.QtCore import QTimer, Qt
@@ -46,10 +46,12 @@ class SceneChaserMixin:
         
         for data in active_scenes_data:
             scena_nome = data.get('scena_nome')
-            master_value = data.get('master_value', 255)
+            # Manteniamo il valore salvato, ma non è più modificabile dalla UI
+            master_value = data.get('master_value', 255) 
             scena = scene_map.get(scena_nome)
             if scena:
-                rebuilt_scenes.append(ActiveScene(scena, master_value))
+                # Forza Master a 255 in ActiveScene, mantenendo la vecchia struttura dati
+                rebuilt_scenes.append(ActiveScene(scena, master_value=255)) 
                 
         return rebuilt_scenes
 
@@ -59,7 +61,8 @@ class SceneChaserMixin:
         """Aggiunge una scena alla lista attiva in base all'indice (0-based) dalla lista salvata. [MODIFICATO]"""
         if 0 <= index < len(self.scene_list):
             scena_da_applicare = self.scene_list[index]
-            self._add_scene_to_active(scena_da_applicare, master_value=255) # L'applicazione da MIDI è Master 255
+            # Master value è FISSATO a 255 per le scene attive
+            self._add_scene_to_active(scena_da_applicare, master_value=255) 
             self.setWindowTitle(f"DMX Controller - Scena MIDI: {scena_da_applicare.nome}")
         else:
              print(f"MIDI Error: Indice scena {index} fuori limite.")
@@ -104,12 +107,14 @@ class SceneChaserMixin:
         found = False
         for active_scene in self.active_scenes:
             if active_scene.scena.nome == scene.nome:
-                active_scene.master_value = master_value
+                # Il master è fisso a 255 per le scene attive
+                active_scene.master_value = 255 
                 found = True
                 break
         
         if not found:
-             self.active_scenes.append(ActiveScene(scene, master_value))
+             # Usa master_value FISSATO a 255 per le scene attive
+             self.active_scenes.append(ActiveScene(scene, master_value=255)) 
              
         self._update_active_scenes_ui()
         self._merge_and_send_dmx()
@@ -121,11 +126,7 @@ class SceneChaserMixin:
             self._update_active_scenes_ui()
             self._merge_and_send_dmx()
             
-    def _update_active_scene_master(self, index: int, value: int):
-        """Aggiorna il valore master di una scena attiva e rifonde l'output DMX. [NUOVO]"""
-        if 0 <= index < len(self.active_scenes):
-            self.active_scenes[index].master_value = value
-            self._merge_and_send_dmx()
+    # [RIMOSSO _update_active_scene_master, la logica master è sul fader generale]
             
     def _merge_and_send_dmx(self):
         """Metodo per chiamare la fusione HTP e inviare DMX. [NUOVO]"""
@@ -137,6 +138,7 @@ class SceneChaserMixin:
         """Serializza le scene attive nello stato del progetto. [NUOVO]"""
         u_stato = next((u for u in self.progetto.universi_stato if u.id_universo == self.universo_attivo.id_universo), None)
         if u_stato:
+             # Manteniamo il master_value per la persistenza, anche se è fisso a 255
              u_stato.active_scenes_data = [{'scena_nome': s.scena.nome, 'master_value': s.master_value} for s in self.active_scenes]
              self._salva_stato_progetto()
 
@@ -149,15 +151,17 @@ class SceneChaserMixin:
         # Pulisci il layout esistente
         for i in reversed(range(self.active_scenes_layout.count())): 
             item = self.active_scenes_layout.itemAt(i)
+            # Pulizia per il vecchio formato (widget singolo o layout)
             if item.widget():
                  item.widget().deleteLater()
             elif item.layout():
-                 # Pulisci il sub-layout
                  sub_layout = item.layout()
                  for j in reversed(range(sub_layout.count())):
                       widget = sub_layout.itemAt(j).widget()
                       if widget: widget.deleteLater()
-                 
+                 # Rimuovi il layout stesso
+                 self.active_scenes_layout.removeItem(item)
+
         if not self.active_scenes:
             self.active_scenes_layout.addWidget(QLabel("Nessuna Scena Attiva"))
             return
@@ -165,53 +169,99 @@ class SceneChaserMixin:
         # Ricrea i widget per le scene attive
         for idx, active_scene in enumerate(self.active_scenes):
             scene_widget = QWidget()
+            # Layout orizzontale per nome e pulsante X
             h_layout = QHBoxLayout(scene_widget)
+            h_layout.setContentsMargins(0, 0, 0, 0)
             
             # 1. Label e pulsante Rimuovi
-            label_text = f"{active_scene.scena.nome}"
+            # Rimosso il riferimento al master_value.
+            label_text = f"{active_scene.scena.nome}" 
             label = QLabel(label_text)
             
+            # Pulsante X con connessione al metodo di rimozione
             btn_remove = QPushButton("X")
             btn_remove.setFixedSize(20, 20)
+            # Connessione: il lambda è necessario per passare l'indice corretto
             btn_remove.clicked.connect(lambda _, index=idx: self._remove_active_scene(index))
             
             h_layout.addWidget(label, 1)
             h_layout.addWidget(btn_remove)
 
-            # 2. Slider Master
-            master_slider = QSlider(Qt.Orientation.Horizontal)
-            master_slider.setRange(0, 255)
-            master_slider.setValue(active_scene.master_value)
-            
-            # Connessione al metodo di aggiornamento
-            master_slider.valueChanged.connect(lambda val, index=idx: self._update_active_scene_master(index, val))
-            
-            v_layout = QVBoxLayout()
-            v_layout.addWidget(scene_widget)
-            v_layout.addWidget(master_slider)
-            
-            self.active_scenes_layout.addLayout(v_layout)
+            # Aggiungi l'intero widget (contenente label e pulsante X) al layout principale.
+            self.active_scenes_layout.addWidget(scene_widget)
+
+
+    def _build_active_scenes_control(self):
+        """Costruisce il pannello per la gestione delle scene attive. [NUOVO]"""
+        scenes_group = QGroupBox("Scene Attive (Programmer)")
+        
+        # Layout per la lista dinamica
+        self.active_scenes_layout = QVBoxLayout() 
+        self.active_scenes_layout.setContentsMargins(5, 15, 5, 5) # Margini per il QVBoxLayout
+        self.active_scenes_layout.setSpacing(5)
+
+        # Wrapper per la lista dinamica 
+        wrapper = QWidget()
+        wrapper.setLayout(self.active_scenes_layout)
+        
+        main_layout = QVBoxLayout(scenes_group)
+        main_layout.addWidget(wrapper, 1)
+        main_layout.setContentsMargins(5, 5, 5, 5) # Margini per il QGroupBox
+
+        # Carica lo stato iniziale
+        self._update_active_scenes_ui()
+        
+        return scenes_group
 
 
     # --- Scene Logic ---
 
     def _cattura_scena_corrente(self):
-        """Crea una nuova Scena dallo stato corrente e la salva."""
+        """
+        Crea una nuova Scena dallo stato corrente e la salva,
+        o sovrascrive una scena esistente con lo stesso nome.
+        [MODIFICATO]
+        """
         scene_name = self.scene_name_input.text().strip()
         if not scene_name:
             QMessageBox.warning(self, "Errore", "Inserisci un nome per la Scena.")
             return
 
+        # 1. Cattura lo stato DMX corrente nell'oggetto Scena
         nuova_scena = self.universo_attivo.cattura_scena(scene_name)
-        self.scene_list.append(nuova_scena)
+        
+        # 2. Cerca una scena esistente con lo stesso nome
+        scena_esistente = next((s for s in self.scene_list if s.nome == scene_name), None)
+        
+        message = "" # Variabile per il messaggio di successo
+
+        if scena_esistente:
+            # 3. Chiedi conferma per sovrascrivere
+            reply = QMessageBox.question(self, 'Sovrascrivi Scena', 
+                f"La Scena '{scene_name}' esiste già. Vuoi sovrascriverla con lo stato DMX corrente?", 
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
+                QMessageBox.StandardButton.No)
+
+            if reply == QMessageBox.StandardButton.Yes:
+                # 4. Sovrascrivi (sostituisci l'oggetto Scena nella lista)
+                index = self.scene_list.index(scena_esistente)
+                self.scene_list[index] = nuova_scena
+                message = f"Scena '{scene_name}' sovrascritta con successo."
+            else:
+                return # Operazione annullata
+        else:
+            # 5. Nuova scena
+            self.scene_list.append(nuova_scena)
+            message = f"Scena '{scene_name}' salvata con successo."
         
         self._update_scene_list_ui()
         self.scene_name_input.clear()
         
         self._salva_stato_progetto()
         
-        QTimer.singleShot(10, lambda: QMessageBox.information(self, "Scena Salvata", f"Scena '{scene_name}' salvata."))
+        QTimer.singleShot(10, lambda: QMessageBox.information(self, "Scena Salvata", message))
 
+        
     def _update_scene_list_ui(self):
         """Aggiorna la QListWidget che mostra le scene salvate."""
         if not hasattr(self, 'scene_list_widget'):
@@ -233,6 +283,7 @@ class SceneChaserMixin:
         index = self.scene_list_widget.row(selected_items[0])
         scena_da_applicare = self.scene_list[index]
         
+        # Chiamata al metodo con valore Master fisso (255)
         self._add_scene_to_active(scena_da_applicare, master_value=255)
         
         # L'aggiornamento UI e DMX è gestito da _add_scene_to_active (via _merge_and_send_dmx)
@@ -544,14 +595,17 @@ class SceneChaserMixin:
         
         # Layout per la lista dinamica
         self.active_scenes_layout = QVBoxLayout() 
-        
-        # Wrapper per la lista dinamica (per lo scroll, se necessario, non implementato per semplicità)
+        self.active_scenes_layout.setContentsMargins(5, 15, 5, 5) # Margini per il QVBoxLayout
+        self.active_scenes_layout.setSpacing(5)
+
+        # Wrapper per la lista dinamica 
         wrapper = QWidget()
         wrapper.setLayout(self.active_scenes_layout)
         
         main_layout = QVBoxLayout(scenes_group)
         main_layout.addWidget(wrapper, 1)
-        
+        main_layout.setContentsMargins(5, 5, 5, 5) # Margini per il QGroupBox
+
         # Carica lo stato iniziale
         self._update_active_scenes_ui()
         
