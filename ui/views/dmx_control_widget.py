@@ -279,26 +279,34 @@ class DMXControlWidget(QWidget,
         
         editor_layout = QHBoxLayout()
         self.btn_open_chaser_editor = QPushButton("Crea / Modifica Sequenza") 
+        # Chiamata diretta al metodo del Mixin
         self.btn_open_chaser_editor.clicked.connect(self._open_chaser_editor_dialog)
+        
         self.btn_delete_chaser = QPushButton("Cancella Sequenza") 
         self.btn_delete_chaser.clicked.connect(self._cancella_chaser_selezionato)
         editor_layout.addWidget(self.btn_open_chaser_editor)
         editor_layout.addWidget(self.btn_delete_chaser)
         chaser_layout.addLayout(editor_layout)
         
-        chaser_layout.addWidget(QLabel("\nSequenze Salvate (Seleziona per Avviare):"))
+        chaser_layout.addWidget(QLabel("\nSequenze Salvate (Click Singolo per Avviare/Interrompere):"))
         self.chaser_list_widget = QListWidget() 
+        
+        # NUOVA CONNESSIONE: Click Singolo per avviare/fermare il chaser
+        self.chaser_list_widget.itemClicked.connect(self._handle_chaser_single_click_for_activation)
+        # Doppio click per aprire l'editor
         self.chaser_list_widget.doubleClicked.connect(self._open_chaser_editor_dialog) 
+        
         chaser_layout.addWidget(self.chaser_list_widget, 1) # Stretch 1 for QListWidget
         
-        chaser_ctrl_layout = QHBoxLayout()
-        self.btn_start_chaser = QPushButton("Avvia Sequenza Selezionata") 
-        self.btn_start_chaser.clicked.connect(self._avvia_chaser) 
-        self.btn_stop_chaser = QPushButton("Stop Sequenza") 
-        self.btn_stop_chaser.clicked.connect(self._ferma_chaser) 
-        chaser_ctrl_layout.addWidget(self.btn_start_chaser)
-        chaser_ctrl_layout.addWidget(self.btn_stop_chaser)
-        chaser_layout.addLayout(chaser_ctrl_layout)
+        # RIMOSSO: Pulsanti Start/Stop
+        # chaser_ctrl_layout = QHBoxLayout()
+        # self.btn_start_chaser = QPushButton("Avvia Sequenza Selezionata") 
+        # self.btn_start_chaser.clicked.connect(self._avvia_chaser) 
+        # self.btn_stop_chaser = QPushButton("Stop Sequenza") 
+        # self.btn_stop_chaser.clicked.connect(self._ferma_chaser) 
+        # chaser_ctrl_layout.addWidget(self.btn_start_chaser)
+        # chaser_ctrl_layout.addWidget(self.btn_stop_chaser)
+        # chaser_layout.addLayout(chaser_ctrl_layout)
         
         col_layout.addWidget(chaser_group, 2) # Groupbox ha stretch factor 2
 
@@ -326,7 +334,7 @@ class DMXControlWidget(QWidget,
         
     def _open_fixture_editor(self):
         super()._open_fixture_editor()
-
+        
     def _open_midi_mapping_dialog(self):
         # Assicuriamo che le liste siano aggiornate, prendendole dai mixin
         scene_list = getattr(self, 'scene_list', [])
@@ -361,4 +369,22 @@ class DMXControlWidget(QWidget,
         super()._open_add_fixture_dialog()
         
     def _open_chaser_editor_dialog(self):
-        super()._open_chaser_editor_dialog()
+        # Chiamata diretta al metodo implementato nel SceneChaserMixin (che è un genitore)
+        
+        # Assicuriamo che le liste siano aggiornate
+        scene_list = getattr(self, 'scene_list', [])
+        chaser_to_edit = None
+        
+        selected_items = self.chaser_list_widget.selectedItems()
+        if selected_items:
+            index = self.chaser_list_widget.row(selected_items[0])
+            if 0 <= index < len(self.chaser_list):
+                 chaser_to_edit = self.chaser_list[index]
+
+        dialog = ChaserEditorDialog(
+             parent=self,
+             scene_list=scene_list,
+             chaser_to_edit=chaser_to_edit
+        )
+        dialog.chaser_saved.connect(self._handle_chaser_saved) 
+        dialog.exec()

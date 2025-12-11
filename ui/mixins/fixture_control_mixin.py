@@ -1,4 +1,4 @@
-# ui/mixins/fixture_control_mixin.py (COMPLETO E AGGIORNATO per logica "Blackout su Idle")
+# ui/mixins/fixture_control_mixin.py (COMPLETO E AGGIORNATO per logica "Blackout su Idle" e Dimmer Precedence)
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
@@ -104,7 +104,6 @@ class FixtureControlMixin:
                 
                 else:
                     # IDLE / BLACKOUT MODE: Se non ci sono scene attive, l'output DMX deve essere 0 (Blackout).
-                    # Forziamo il valore di output al valore di default (tipicamente 0).
                     
                     # Ottieni il valore di default del canale (Blackout state)
                     default_value = instance.modello.descrizione_canali[i].valore_default
@@ -490,7 +489,7 @@ class FixtureControlMixin:
         fixture_instance.set_valore_canale(indice_canale, valore)
         self.universo_attivo.aggiorna_canali_universali()
         
-        # 2. Applica il Master Dimmer (MDA)
+        # 2. Applica il Master Dimmer
         self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
         
         self.aggiorna_simulazione_luce(fixture_instance)
@@ -502,9 +501,9 @@ class FixtureControlMixin:
     def aggiorna_simulazione_luce(self, instance: IstanzaFixture):
         """
         Aggiorna il colore nel widget StageView (Stage View) usando la miscelazione additiva
-        per simulare il colore finale (RGB + W, A, UV). [CORRETTO per MDA]
+        per simulare il colore finale (RGB + W, A, UV).
         
-        Nota: i valori in instance.valori_correnti sono i valori DMX finali (già scalati dall'MDA).
+        CORREZIONE: Applica il valore del canale Dimmer della fixture come fattore di attenuazione finale.
         """
         import numpy as np
         
@@ -512,7 +511,10 @@ class FixtureControlMixin:
         
         # Accumulatori in virgola mobile (0.0 - 255.0 * N_CANALI)
         total_r, total_g, total_b = 0.0, 0.0, 0.0
-        max_dimmer_val = 255.0 # Dimmer predefinito al massimo se non trovato
+        
+        # Variabili per tracciare il Dimmer:
+        fixture_has_dimmer = False
+        max_dimmer_val = 0.0 # <-- Inizializzato a 0.0. Se un dimmer è trovato, usiamo il suo valore HTP.
         
         # Fattori RGB per i colori secondari (normalizzati a 1.0, poi scalati da 'val')
         # Amber (Warm: 255, 210, 100)
@@ -526,7 +528,10 @@ class FixtureControlMixin:
         if instance.modello.nome == "Algam LED Bianco (Virtuale)" and valori:
             white_level = float(valori[0])
             total_r, total_g, total_b = white_level, white_level, white_level
-            max_dimmer_val = 255.0 
+            # Si assume che il canale White Level agisca come Dimmer *e* Colore. 
+            # In questo caso, il fattore di dimming è dato dal canale stesso.
+            max_dimmer_val = white_level
+            fixture_has_dimmer = True
         # === FINE LOGICA LED BIANCO ===
         
         # Logica Generale
@@ -535,10 +540,10 @@ class FixtureControlMixin:
                 nome = canale.nome.lower()
                 val = float(valori[i]) # Valore DMX finale (già scalato)
                 
-                # Dimmer Master
+                # Dimmer Master (per la singola fixture)
                 if 'dimmer' in nome or 'intensità' in canale.funzione.lower():
-                    # Sovrascrive il dimmer master, prendendo il valore più alto trovato
-                    # Questo valore è GIA' SCALATO dall'MDA o è il valore di scena/fader scalato.
+                    fixture_has_dimmer = True
+                    # Sovrascrive il dimmer max, prendendo il valore più alto trovato
                     max_dimmer_val = max(max_dimmer_val, val) 
                     
                 # Miscelazione Additiva dei Canali Colore (RGB)
@@ -570,10 +575,20 @@ class FixtureControlMixin:
         final_g_raw = min(255.0, total_g)
         final_b_raw = min(255.0, total_b)
         
-        # Non si applica più il fattore dimmer finale (per evitare doppio dimming)
+        # [CORREZIONE FATTORIALE]
+        if fixture_has_dimmer:
+            # Se un dimmer è stato trovato (e ha valore 0 in questo caso), usiamo quel valore.
+            dimmer_factor = max_dimmer_val / 255.0
+        else:
+            # Se nessun dimmer è stato trovato, si assume dimmer 255 (sempre acceso).
+            dimmer_factor = 1.0
+
+        final_r = final_r_raw * dimmer_factor
+        final_g = final_g_raw * dimmer_factor
+        final_b = final_b_raw * dimmer_factor
         
         if self.stage_view:
-            self.stage_view.update_light_color(instance.indirizzo_inizio, final_r_raw, final_g_raw, final_b_raw)
+            self.stage_view.update_light_color(instance.indirizzo_inizio, final_r, final_g, final_b)
             
     # Firma modificata per accettare il nome utente
     def _aggiungi_istanza_core(self, selected_model: FixtureModello, start_addr: int, nome_utente: str):

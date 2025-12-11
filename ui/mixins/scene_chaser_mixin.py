@@ -1,4 +1,4 @@
-# ui/mixins/scene_chaser_mixin.py (COMPLETO E AGGIORNATO per click singolo/doppio)
+# ui/mixins/scene_chaser_mixin.py (COMPLETO E AGGIORNATO per Layering Chaser e Attivazione Click)
 
 from PyQt6.QtWidgets import QMessageBox 
 from PyQt6.QtCore import QTimer, Qt
@@ -8,7 +8,7 @@ import time
 import threading 
 from core.dmx_models import ActiveScene 
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QGroupBox, QPushButton 
-
+from ui.components.chaser_editor_dialog import ChaserEditorDialog # Import necessario
 
 # Frequenza del timer di fade (in Hz)
 FADE_RATE_HZ = 100 
@@ -87,9 +87,12 @@ class SceneChaserMixin:
             
             self.chaser_attivo = chaser_to_start
             self._FADE_DATA.clear()
-            # Riavvia il chaser dal primo passo (next_passo lo farà ciclare)
+            
+            # Imposta l'indice di partenza (per il ciclo)
             self.chaser_attivo.indice_corrente = len(self.chaser_attivo.passi) - 1 
+            
             self._esegui_passo_chaser() 
+            
             self.setWindowTitle(f"DMX Controller - CHASER ATTIVO MIDI: {chaser_to_start.nome}")
             self._update_chaser_list_ui()
         else:
@@ -101,6 +104,7 @@ class SceneChaserMixin:
     def _add_scene_to_active(self, scene: Scena, master_value: int = 255):
         """Aggiunge una scena alla lista delle scene attive (se non è già presente). [NUOVO]"""
         if self.chaser_attivo:
+            # Se un Chaser è attivo, non aggiungiamo scene al programmer, ma lo fermiamo.
             self._ferma_chaser(show_message=False)
 
         # Controlla se la scena è già attiva
@@ -155,7 +159,7 @@ class SceneChaserMixin:
 
 
     def _update_active_scenes_ui(self):
-        """Aggiorna la QListWidget e il layout delle scene attive. [NUOVO]"""
+        """Aggiorna la QListWidget e il layout delle scene attive. [MODIFICATO per CHASER]"""
         if not hasattr(self, 'active_scenes_layout'):
             return
             
@@ -173,23 +177,40 @@ class SceneChaserMixin:
                  # Rimuovi il layout stesso
                  self.active_scenes_layout.removeItem(item)
 
-        if not self.active_scenes:
+        has_active_items = bool(self.active_scenes) or self.chaser_attivo is not None
+
+        if not has_active_items:
             self.active_scenes_layout.addWidget(QLabel("Nessuna Scena Attiva"))
             return
 
-        # Ricrea i widget per le scene attive
+        # 1. Mostra il Chaser Attivo (se presente)
+        if self.chaser_attivo:
+            chaser_widget = QWidget()
+            h_layout = QHBoxLayout(chaser_widget)
+            h_layout.setContentsMargins(0, 0, 0, 0)
+            
+            label_text = f"CHASER: {self.chaser_attivo.nome} (Active)" 
+            label = QLabel(label_text)
+            label.setStyleSheet("font-weight: bold; color: yellow;")
+            
+            # Pulsante Stop Chaser
+            btn_stop = QPushButton("Stop")
+            btn_stop.setFixedSize(40, 20)
+            btn_stop.clicked.connect(lambda: self._ferma_chaser())
+
+            h_layout.addWidget(label, 1)
+            h_layout.addWidget(btn_stop)
+            self.active_scenes_layout.addWidget(chaser_widget)
+            
+        # 2. Mostra le Scene Attive
         for idx, active_scene in enumerate(self.active_scenes):
             scene_widget = QWidget()
-            # Layout orizzontale per nome e pulsante X
             h_layout = QHBoxLayout(scene_widget)
             h_layout.setContentsMargins(0, 0, 0, 0)
             
-            # 1. Label e pulsante Rimuovi
-            # Rimosso il riferimento al master_value.
-            label_text = f"{active_scene.scena.nome}" 
+            label_text = f"SCENA: {active_scene.scena.nome}" 
             label = QLabel(label_text)
             
-            # Pulsante X con connessione al metodo di rimozione
             btn_remove = QPushButton("X")
             btn_remove.setFixedSize(20, 20)
             # Connessione: il lambda è necessario per passare l'indice corretto
@@ -198,7 +219,6 @@ class SceneChaserMixin:
             h_layout.addWidget(label, 1)
             h_layout.addWidget(btn_remove)
 
-            # Aggiungi l'intero widget (contenente label e pulsante X) al layout principale.
             self.active_scenes_layout.addWidget(scene_widget)
 
 
@@ -368,7 +388,7 @@ class SceneChaserMixin:
             
         selected_items = self.scene_list_widget.selectedItems()
         if not selected_items:
-            QMessageBox.warning(self, "Errore", "Seleziona una scena da cancellare.")
+            QMessageBox.warning(self, "Erro", "Seleziona una scena da cancellare.")
             return
 
         index = self.scene_list_widget.row(selected_items[0])
@@ -388,6 +408,7 @@ class SceneChaserMixin:
             
         self.chaser_list_widget.clear()
         for c in self.chaser_list:
+            # Corretto: usa c.nome per la visualizzazione corretta di un singolo chaser attivo.
             status = " (ATTIVO)" if self.chaser_attivo and c.nome == self.chaser_attivo.nome else ""
             self.chaser_list_widget.addItem(f"{c.nome} ({len(c.passi)} passi){status}")
             
@@ -436,7 +457,7 @@ class SceneChaserMixin:
     # --- Chaser Runtime Logic ---
 
     def _avvia_chaser(self):
-        """Avvia il chaser selezionato dalla lista."""
+        """Avvia il chaser selezionato dalla lista. [MODIFICATO per Layering]"""
         if self.chaser_timer.isActive() or self.fade_timer.isActive():
             QMessageBox.warning(self, "Avvio Fallito", "Il Chaser è già in esecuzione.")
             return
@@ -457,17 +478,55 @@ class SceneChaserMixin:
             QMessageBox.warning(self, "Avvio Fallito", "La Sequenza selezionata non contiene passi.")
             return
             
+        # Ferma i timer di fade/chaser precedenti (anche se la check all'inizio è sufficiente)
+        if self.chaser_timer.isActive() or self.fade_timer.isActive():
+            self._ferma_chaser(show_message=False)
+            
         self.chaser_attivo = chaser_to_start
-        
         self._FADE_DATA.clear()
         
+        # Imposta l'indice di partenza (per il ciclo)
         self.chaser_attivo.indice_corrente = len(self.chaser_attivo.passi) - 1 
         
         self._esegui_passo_chaser() 
         
-        self.setWindowTitle(f"DMX Controller - CHASER ATTIVO: {self.chaser_attivo.nome}")
-        self._update_chaser_list_ui()
-        
+        self.setWindowTitle(f"DMX Controller - CHASER ATTIVO: {chaser_to_start.nome}")
+        self._update_chaser_list_ui() # Aggiorna la UI per mostrare il Chaser attivo
+
+    def _handle_chaser_single_click_for_activation(self):
+        """
+        Gestisce il click singolo sulla lista Chaser per l'attivazione/disattivazione. [NUOVO]
+        """
+        if not hasattr(self, 'chaser_list_widget'):
+            return
+            
+        selected_items = self.chaser_list_widget.selectedItems()
+        if not selected_items:
+            return
+            
+        index = self.chaser_list_widget.row(selected_items[0])
+        chaser_to_toggle = self.chaser_list[index]
+
+        if self.chaser_attivo and self.chaser_attivo.nome == chaser_to_toggle.nome:
+            # Se è già attivo, lo ferma
+            self._ferma_chaser(show_message=False)
+        else:
+            # Se non è attivo, lo avvia
+            if self.chaser_timer.isActive() or self.fade_timer.isActive():
+                 self._ferma_chaser(show_message=False)
+            
+            if not chaser_to_toggle.passi:
+                 QMessageBox.warning(self, "Avvio Fallito", "La Sequenza selezionata non contiene passi.")
+                 return
+                 
+            self.chaser_attivo = chaser_to_toggle
+            self._FADE_DATA.clear()
+            self.chaser_attivo.indice_corrente = len(self.chaser_attivo.passi) - 1 
+            self._esegui_passo_chaser() 
+            self.setWindowTitle(f"DMX Controller - CHASER ATTIVO: {chaser_to_toggle.nome}")
+            self._update_chaser_list_ui()
+            self._update_active_scenes_ui() # Aggiorna la lista delle scene attive
+
     def _ferma_chaser(self, show_message: bool = True):
         """Ferma il chaser se in esecuzione. [MODIFICATO]"""
         if self.chaser_timer.isActive():
@@ -477,14 +536,15 @@ class SceneChaserMixin:
         
         self._FADE_DATA.clear()
         
-        # [NUOVO] Se il chaser viene fermato, rimuovi tutte le scene attive (se non provenienti dal fader manuale)
+        # Quando il chaser si ferma, l'output deve tornare al Layer Scene Attive (Programmer).
+        # Poiché il chaser non ha toccato self.active_scenes, chiamiamo solo la fusione.
         if self.chaser_attivo:
-            self.active_scenes.clear()
-            self._merge_and_send_dmx()
+            self.chaser_attivo = None 
+            self._merge_and_send_dmx() # Ritorna all'output solo delle scene attive/Blackout.
+            self._update_active_scenes_ui() # Aggiorna la lista delle scene attive
         
         self.setWindowTitle(f"DMX Controller - Universo {self.universo_attivo.id_universo}")
-        self.chaser_attivo = None 
-        self._update_chaser_list_ui() 
+        self._update_chaser_list_ui() # Aggiorna la UI per rimuovere l'indicazione Chaser attivo
             
         if show_message:
             QTimer.singleShot(10, lambda: QMessageBox.information(self, "Stop Chaser", "Sequenza interrotta."))
@@ -500,7 +560,7 @@ class SceneChaserMixin:
             
             # 1. Prepara per il Fade In
             if passo.tempo_fade_in > 0.0:
-                self._start_fade(passo.scena, passo.tempo_fade_in)
+                self._start_fade(passo.scena, passo.tempo_fade_in, is_chaser_step=True)
                 
                 self.chaser_timer.stop()
                 
@@ -518,12 +578,15 @@ class SceneChaserMixin:
                 return 
 
             else:
-                # 2. Nessun Fade In, applicazione istantanea (NON dimmata)
-                self.universo_attivo.applica_scena(passo.scena)
+                # --- Applicazione Istantanea (Senza Fade) ---
                 
-                # 3. [NUOVO] Applica il Master Dimmer
-                if hasattr(self, '_apply_master_dimmer_to_array_only'):
-                     self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
+                # 2. Applica la scena del passo Chaser (CSL) sulla base (SLR/PS/Blackout)
+                dmx_array = self._apply_chaser_step_to_array(passo.scena)
+
+                # 3. Applica il Master Dimmer (MDA)
+                dmx_array = self._apply_master_dimmer_to_array_only(dmx_array)
+                
+                self.universo_attivo.array_canali = dmx_array
                 
                 # 4. [MODIFICATO - THREADING] Invia DMX in un thread separato
                 dmx_data_copy = self.universo_attivo.array_canali[:]
@@ -546,52 +609,50 @@ class SceneChaserMixin:
         except IndexError:
             self._ferma_chaser()
     
-    def _start_fade(self, target_scena: Scena, fade_time: float):
-        """Avvia l'interpolazione graduale dei valori DMX."""
+    def _start_fade(self, target_scena: Scena, fade_time: float, is_chaser_step: bool = False):
+        """Avvia l'interpolazione graduale dei valori DMX. [MODIFICATO per Chaser Layering]"""
         
-        if fade_time <= 0.0:
-            self.universo_attivo.applica_scena(target_scena)
+        # 0. Ottiene l'array di partenza (l'output DMX corrente, che include MDA)
+        start_values = self.universo_attivo.array_canali[:] 
             
-            # [NUOVO] Applica il Master Dimmer
+        if fade_time <= 0.0:
+            # Fallback istantaneo
+            self.universo_attivo.array_canali = self._apply_chaser_step_to_array(target_scena)
+            
             if hasattr(self, '_apply_master_dimmer_to_array_only'):
                  self.universo_attivo.array_canali = self._apply_master_dimmer_to_array_only(self.universo_attivo.array_canali)
 
-            # [MODIFICATO - THREADING] Invia DMX in un thread separato
             dmx_data_copy = self.universo_attivo.array_canali[:]
             threading.Thread(target=self.dmx_comm.send_dmx_packet, args=(dmx_data_copy,)).start()
 
             self._aggiorna_ui_fader_e_stage()
             return
         
-        # 1. Prepara i valori di partenza (valori attuali, potenzialmente già dimmati)
-        start_values = self.universo_attivo.array_canali[:] 
+        # 1. Calcola i valori di destinazione (output SLR + Step Chaser, SENZA MDA)
+        target_values_raw = self._apply_chaser_step_to_array(target_scena)
         
-        # 2. Calcola i valori di destinazione (NON dimmati, per l'interpolazione lineare)
-        target_raw_values = self.universo_attivo.array_canali[:]
-        
-        for dmx_addr, val in target_scena.valori_canali.items():
-             target_raw_values[dmx_addr - 1] = val
-        
-        # 3. [NUOVO] Applica il Master Dimmer ai valori di destinazione
+        # 2. Applica il Master Dimmer ai valori di destinazione
         if hasattr(self, '_apply_master_dimmer_to_array_only'):
-             target_values = self._apply_master_dimmer_to_array_only(target_raw_values)
+             target_values = self._apply_master_dimmer_to_array_only(target_values_raw)
         else:
-             target_values = target_raw_values
+             target_values = target_values_raw
         
 
         self._FADE_DATA = {
             'start_values': start_values,
-            'target_values': target_values, # <--- Ora dimmati
+            'target_values': target_values, # <--- Ora dimmati e miscelati con la base
             'duration_ms': fade_time * 1000,
             'start_time': time.time(),
-            'target_scene_name': target_scena.nome
+            'target_scene_name': target_scena.nome,
+            'is_chaser_step': is_chaser_step
         }
         
+        self.fade_timer.setInterval(int(self._FADE_TICK_MS))
         self.fade_timer.start()
 
 
     def _fade_tick(self):
-        """Funzione chiamata dal fade_timer per interpolare i valori DMX."""
+        """Funzione chiamata dal fade_timer per interpolare i valori DMX. [MODIFICATO]"""
         if not self._FADE_DATA:
             self.fade_timer.stop()
             return
@@ -681,3 +742,131 @@ class SceneChaserMixin:
         self._update_active_scenes_ui()
         
         return scenes_group
+
+    # --- CHASER HELPER METHODS ---
+
+    def _get_combined_scene_array(self, apply_mda: bool = True) -> list[int]:
+        """
+        Calcola l'output DMX risultante dalla fusione delle Active Scenes (SLR)
+        e lo stato Programmer (PS), o Blackout se non ci sono scene.
+        """
+        
+        # 1. SALVA LO STATO CORRENTE DEL PROGRAMMER (FADER)
+        saved_programmer_values = {}
+        for instance in self.universo_attivo.fixture_assegnate:
+            saved_programmer_values[instance.indirizzo_inizio] = instance.valori_correnti[:]
+        
+        
+        # 2. CALCOLA IL RISULTATO FUSO DEL SOLO SCENE LAYER (SLR)
+        merged_scene_values = {} # {dmx_addr: value}
+        
+        for active_scene in self.active_scenes:
+            scene_data = active_scene.scena.valori_canali
+            master_factor = active_scene.master_value / 255.0
+            
+            for dmx_addr, raw_value in scene_data.items():
+                value_with_master = int(raw_value * master_factor)
+                
+                # Applica HTP tra le scene attive
+                if dmx_addr not in merged_scene_values:
+                    merged_scene_values[dmx_addr] = value_with_master
+                else:
+                    merged_scene_values[dmx_addr] = max(merged_scene_values[dmx_addr], value_with_master)
+        
+        
+        # 3. DETERMINA IL VALORE DMX VINCENTE E SOVRASCRIVI TEMPORANEAMENTE fixture.valori_correnti
+        
+        for instance in self.universo_attivo.fixture_assegnate:
+            start_addr, end_addr = instance.get_indirizzi_universali()
+            programmer_state = saved_programmer_values[instance.indirizzo_inizio]
+            
+            for i in range(instance.modello.numero_canali):
+                dmx_addr = start_addr + i
+                
+                if self.active_scenes:
+                    # PLAYBACK MODE: Output = Scene Layer Result (SLR).
+                    scene_value = merged_scene_values.get(dmx_addr, instance.modello.descrizione_canali[i].valore_default)
+                    instance.valori_correnti[i] = scene_value 
+                
+                else:
+                    # IDLE / BLACKOUT MODE: Se non ci sono scene attive, l'output DMX deve essere 0 (Blackout).
+                    default_value = instance.modello.descrizione_canali[i].valore_default
+                    instance.valori_correnti[i] = default_value
+
+        # 4. Applica l'HTP/LTP DMX finale sull'array universale
+        self.universo_attivo.aggiorna_canali_universali()
+        final_array = self.universo_attivo.array_canali[:]
+
+        # 5. RIPRISTINA LO STATO VERO DEL PROGRAMMER (FADER)
+        for instance in self.universo_attivo.fixture_assegnate:
+            instance.valori_correnti = programmer_state[:]
+             
+        # 6. Applica il Master Dimmer globale (MDA) se richiesto.
+        if apply_mda:
+            return self._apply_master_dimmer_to_array_only(final_array)
+        else:
+            return final_array
+
+    
+    def _apply_chaser_step_to_array(self, step_scena: Scena) -> list[int]:
+        """
+        Fonde il passo Chaser (CSL) sui valori di base ottenuti dalle Scene Attive (SLR).
+        Il risultato è HTP/LTP(SLR, CSL). [CORRETTO per Layering]
+        """
+        # 1. Ottiene la base SLR (Scene Layer Result) - SENZA MDA
+        base_slr_array = self._get_combined_scene_array(apply_mda=False)
+
+        # 2. Salviamo lo stato del Programmer per il ripristino
+        saved_programmer_values = {}
+        for instance in self.universo_attivo.fixture_assegnate:
+             saved_programmer_values[instance.indirizzo_inizio] = instance.valori_correnti[:]
+             
+             start_addr = instance.indirizzo_inizio
+             for i in range(instance.modello.numero_canali):
+                  dmx_addr = start_addr + i
+                  
+                  # Valore base (SLR)
+                  val_base = base_slr_array[dmx_addr - 1]
+                  
+                  # Valore passo Chaser
+                  val_step = step_scena.valori_canali.get(dmx_addr, -1)
+
+                  if val_step != -1:
+                      # Se il Chaser definisce un valore, HTP (Dimmer) o LTP (Colore),
+                      # il valore Step vince su quel canale.
+                      instance.valori_correnti[i] = val_step
+                  else:
+                      # Altrimenti, il canale non è definito nel Chaser, usiamo il valore SLR/base.
+                      instance.valori_correnti[i] = val_base
+
+        # 3. Esegue la fusione HTP/LTP su questo array temporaneo di istance.valori_correnti
+        self.universo_attivo.aggiorna_canali_universali()
+        final_output = self.universo_attivo.array_canali[:]
+
+        # 4. Ripristino Programmer State
+        for instance in self.universo_attivo.fixture_assegnate:
+             instance.valori_correnti = saved_programmer_values[instance.indirizzo_inizio]
+             
+        return final_output
+
+
+    def _open_chaser_editor_dialog(self):
+        """Apre il dialogo editor per creare/modificare un chaser."""
+        from ui.components.chaser_editor_dialog import ChaserEditorDialog 
+        
+        # Determina se stiamo modificando un chaser esistente
+        chaser_to_edit = None
+        if hasattr(self, 'chaser_list_widget'):
+             selected_items = self.chaser_list_widget.selectedItems()
+             if selected_items:
+                 index = self.chaser_list_widget.row(selected_items[0])
+                 if 0 <= index < len(self.chaser_list):
+                     chaser_to_edit = self.chaser_list[index]
+        
+        dialog = ChaserEditorDialog(
+             parent=self,
+             scene_list=self.scene_list,
+             chaser_to_edit=chaser_to_edit
+        )
+        dialog.chaser_saved.connect(self._handle_chaser_saved) 
+        dialog.exec()
